@@ -1,0 +1,13 @@
+syntax: glob
+
+*.ilk
+.vs/*
+.vscode/ipch/*
+*.pdb
+*.exe
+*.dll
+*.dylib
+*.so
+*.sln
+bin/*
+.DS_Store
