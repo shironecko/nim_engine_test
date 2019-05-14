@@ -24,14 +24,16 @@ proc sdlLog(level: LogLevel, msg: string) =
 proc vkLog(level: LogLevel, msg: string) =
     log $LogVulkan, level, msg
 
-proc sdlCheck(res: cint, msg: string) =
+proc sdlCheck(res: cint, msg = "") =
     if res != 0:
-        sdlLog LCritical, msg & "\nSDL Message: " & $sdl.getError()
+        if msg != "": sdlLog LCritical, msg
+        sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
         quit QuitFailure
 
-proc vkCheck(res: VkResult) =
+proc vkCheck(res: VkResult, msg = "") =
     if res != VkResult.success:
-        vkLog LCritical, "Vulkan call failed with: " & $res
+        if msg != "": vkLog LCritical, msg
+        vkLog LCritical, "Call failed: " & $res
         quit QuitFailure
 
 proc GetTime*(): float64 =
@@ -47,8 +49,9 @@ window = createWindow(
     , 640, 480
     , WINDOW_SHOWN or WINDOW_RESIZABLE)
 if window == nil:
-    sdlLog LCritical, "Failed to create window!\nSDL Message: " & $sdl.getError()
-    quit(QuitFailure)
+    sdlLog LCritical, "Failed to create window!"
+    sdlLog LCritical, "Call Failed: " & $sdl.getError()
+    quit QuitFailure
 
 type
     WindowDimentions = object
@@ -81,20 +84,44 @@ var
 vkCheck vkEnumerateInstanceLayerProperties(addr vkLayerCount, nil)
 vkAvailableLayers.setLen(vkLayerCount)
 vkCheck vkEnumerateInstanceLayerProperties(addr vkLayerCount, addr vkAvailableLayers[0])
-vkLog LTrace, "[AvailableVulkanLayers]"
+
+proc charArrayToString[LEN](charArr: array[LEN, char]): string =
+    for c in charArr:
+        if c == '\0': break
+        result &= c
+
+let vkDesiredLayers = ["VK_LAYER_LUNARG_standard_validation"]
+var vkLayersToRequest: seq[string]
+vkLog LTrace, "[AvailableLayers]"
 for layer in vkAvailableLayers:
-    var layerName, layerDescription: string
-    for c in layer.layerName: 
-        if c == '\0': break
-        layerName &= c 
-    for c in layer.description: 
-        if c == '\0': break
-        layerDescription &= c
-    let vkVersion = makeVulkanVersionInfo(layer.specVersion)
-    vkLog LTrace, "$1 ($2, $3)".format(layerName, vkVersion, layer.implementationVersion)
-    vkLog LTrace, layerDescription
+    let layerName = charArrayToString(layer.layerName)
+    vkLog LTrace, "\t$# ($#, $#)".format(layerName, makeVulkanVersionInfo(layer.specVersion), layer.implementationVersion)
+    vkLog LTrace, "\t" & charArrayToString(layer.description)
     vkLog LTrace, ""
-vkLog LTrace, "[/AvailableVulkanLayers]"
+
+    if vkDesiredLayers.contains(layerName): vkLayersToRequest.add(layerName)
+let vkNotFoundLayers = vkDesiredLayers.filterIt(not vkLayersToRequest.contains(it))
+if vkNotFoundLayers.len() != 0: vkLog LWarning, "Requested layers not found: " & $vkNotFoundLayers
+vkLog LInfo, "Requesting layers: " & $vkLayersToRequest
+
+var 
+    vkExtensionCount: uint32
+    vkExtensions: seq[VkExtensionProperties]
+vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, nil)
+vkExtensions.setLen(vkExtensionCount)
+vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, addr vkExtensions[0])
+
+let vkDesiredExtensions = ["VK_EXT_debug_report"]
+var vkExtensionsToRequest: seq[string]
+vkLog LTrace, "[AvailableExtensions]"
+for extension in vkExtensions:
+    let extensionName = charArrayToString(extension.extensionName)
+    vkLog LTrace, "\t$# $#".format(extensionName, makeVulkanVersionInfo(extension.specVersion))
+
+    if vkDesiredExtensions.contains(extensionName): vkExtensionsToRequest.add(extensionName)
+let vkNotFoundExtensions = vkDesiredExtensions.filterIt(not vkExtensionsToRequest.contains(it))
+if vkNotFoundExtensions.len() != 0: vkLog LWarning, "Requested extensions not found: " & $vkNotFoundExtensions
+vkLog LInfo, "Requesting extensions: " & $vkExtensionsToRequest
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
