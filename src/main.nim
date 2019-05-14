@@ -70,8 +70,7 @@ proc makeVulkanVersionInfo(apiVersion: uint): VulkanVersionInfo =
     VulkanVersionInfo(
         major: apiVersion shr 22
         , minor: (apiVersion shr 12) and 0x3ff
-        , patch: apiVersion and 0xfff
-    )
+        , patch: apiVersion and 0xfff)
 proc `$`(vkVersion: VulkanVersionInfo): string = "$#.$#.$#".format(vkVersion.major, vkVersion.minor, vkVersion.patch)
 let vkVersionInfo = makeVulkanVersionInfo(vkApiVersion10)
 vkLog LInfo, "Vulkan API Version: " & $vkVersionInfo
@@ -123,6 +122,28 @@ let vkNotFoundExtensions = vkDesiredExtensions.filterIt(not vkExtensionsToReques
 if vkNotFoundExtensions.len() != 0: vkLog LWarning, "Requested extensions not found: " & $vkNotFoundExtensions
 vkLog LInfo, "Requesting extensions: " & $vkExtensionsToRequest
 
+var appInfo = VkApplicationInfo(
+    sType: VkStructureType.applicationInfo
+    , pNext: nil
+    , pApplicationName: "Nim Vulkan"
+    , applicationVersion: 1
+    , pEngineName: "Dunno"
+    , engineVersion: 1
+    , apiVersion: vkMakeVersion(1, 0, 2))
+
+var instanceCreateInfo = VkInstanceCreateInfo(
+    sType: VkStructureType.instanceCreateInfo
+    , pNext: nil
+    , flags: 0
+    , pApplicationInfo: addr appInfo
+    , enabledLayerCount: 0
+    , ppEnabledLayerNames: nil
+    , enabledExtensionCount: 0
+    , ppEnabledExtensionNames: nil)
+
+var instance: vk.VkInstance
+vkCheck vkCreateInstance(addr instanceCreateInfo, nil, addr instance)
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
 
@@ -141,5 +162,6 @@ block GameLoop:
                     updateRenderResolution(newWindowDimensions)
                     windowDimentions = newWindowDimensions
 
+vkDestroyInstance(instance, nil)
 destroyWindow(window)
 sdl.quit()
