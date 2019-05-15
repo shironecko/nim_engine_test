@@ -2,7 +2,7 @@ import strutils
 import sequtils
 import sdl2/[sdl, sdl_syswm]
 import nim_logger as log
-import vulkan as vk
+import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
 
 type
     LogCategories = enum
@@ -23,6 +23,12 @@ proc sdlLog(level: LogLevel, msg: string) =
 
 proc vkLog(level: LogLevel, msg: string) =
     log $LogVulkan, level, msg
+
+proc check(condition: bool, msg = "") =
+    if not condition:
+        if msg != "": gLog LCritical, msg
+        gLog LCritical, "Check failed!"
+        quit QuitFailure
 
 proc sdlCheck(res: cint, msg = "") =
     if res != 0:
@@ -148,6 +154,29 @@ vkCheck vkCreateInstance(addr instanceCreateInfo, nil, addr instance)
 deallocCStringArray(vkLayersCStrings)
 deallocCStringArray(vkExtensionsCStrings)
 
+let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugReportFlagsEXT; objectType: VkDebugReportObjectTypeEXT; cbObject: uint64; location: csize; messageCode:  int32; pLayerPrefix: cstring; pMessage: cstring; pUserData: pointer): VkBool32 {.cdecl.} =
+    var logLevel = LTrace
+    if   (flags and uint32(VkDebugReportFlagBitsEXT.error)) != 0:               logLevel = LError
+    elif (flags and uint32(VkDebugReportFlagBitsEXT.warning)) != 0:             logLevel = LWarning
+    elif (flags and uint32(VkDebugReportFlagBitsEXT.performanceWarning)) != 0:  logLevel = LWarning
+    elif (flags and uint32(VkDebugReportFlagBitsEXT.information)) != 0:         logLevel = LInfo
+    elif (flags and uint32(VkDebugReportFlagBitsEXT.debug)) != 0:               logLevel = LTrace
+    vkLog logLevel, "$# $# $# $#".format(pLayerPrefix, objectType, messageCode, pMessage)
+    vkFalse
+
+let
+    vkCreateDebugReportCallbackEXT = cast[PFN_vkCreateDebugReportCallbackEXT](vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT"))
+    vkDestroyDebugReportCallbackEXT = cast[PFN_vkDestroyDebugReportCallbackEXT](vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"))
+check vkCreateDebugReportCallbackEXT != nil, "VK: failed to load vkCreateDebugReportCallbackEXT proc!"
+check vkDestroyDebugReportCallbackEXT != nil, "VK: failed to load vkDestroyDebugReportCallbackEXT proc!"
+var 
+    vkCallbackCreateInfo = VkDebugReportCallbackCreateInfoEXT(
+        sType: VkStructureType.debugReportCallbackCreateInfoExt
+        , flags: uint32(VkDebugReportFlagBitsEXT.error) or uint32(VkDebugReportFlagBitsEXT.warning) or uint32(VkDebugReportFlagBitsEXT.performanceWarning)
+        , pfnCallback: vkDebugReportCallback)
+    vkDebugCallback: VkDebugReportCallbackEXT
+vkCheck vkCreateDebugReportCallbackEXT(instance, addr vkCallbackCreateInfo, nil, addr vkDebugCallback)
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
 
@@ -166,6 +195,7 @@ block GameLoop:
                     updateRenderResolution(newWindowDimensions)
                     windowDimentions = newWindowDimensions
 
+vkDestroyDebugReportCallbackEXT(instance, vkDebugCallback, nil)
 vkDestroyInstance(instance, nil)
 destroyWindow(window)
 sdl.quit()

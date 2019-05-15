@@ -1,3 +1,5 @@
+--parallel_build:1
+--cpu:amd64
 --app:console
 --debugger:native
 when defined(windows):
