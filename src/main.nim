@@ -129,20 +129,24 @@ var appInfo = VkApplicationInfo(
     , applicationVersion: 1
     , pEngineName: "Dunno"
     , engineVersion: 1
-    , apiVersion: vkMakeVersion(1, 0, 2))
+    , apiVersion: vkVersion10)
 
+let vkLayersCStrings = allocCStringArray(vkLayersToRequest)
+let vkExtensionsCStrings = allocCStringArray(vkExtensionsToRequest)
 var instanceCreateInfo = VkInstanceCreateInfo(
     sType: VkStructureType.instanceCreateInfo
     , pNext: nil
     , flags: 0
     , pApplicationInfo: addr appInfo
-    , enabledLayerCount: 0
-    , ppEnabledLayerNames: nil
-    , enabledExtensionCount: 0
-    , ppEnabledExtensionNames: nil)
+    , enabledLayerCount: uint32 vkLayersToRequest.len()
+    , ppEnabledLayerNames: vkLayersCStrings
+    , enabledExtensionCount: uint32 vkExtensionsToRequest.len()
+    , ppEnabledExtensionNames: vkExtensionsCStrings)
 
 var instance: vk.VkInstance
 vkCheck vkCreateInstance(addr instanceCreateInfo, nil, addr instance)
+deallocCStringArray(vkLayersCStrings)
+deallocCStringArray(vkExtensionsCStrings)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
