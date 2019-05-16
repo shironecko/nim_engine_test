@@ -97,7 +97,7 @@ proc charArrayToString[LEN](charArr: array[LEN, char]): string =
 
 let vkDesiredLayers = ["VK_LAYER_LUNARG_standard_validation"]
 var vkLayersToRequest: seq[string]
-vkLog LTrace, "[AvailableLayers]"
+vkLog LTrace, "[Layers]"
 for layer in vkAvailableLayers:
     let layerName = charArrayToString(layer.layerName)
     vkLog LTrace, "\t$# ($#, $#)".format(layerName, makeVulkanVersionInfo(layer.specVersion), layer.implementationVersion)
@@ -118,7 +118,7 @@ vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, addr 
 
 let vkDesiredExtensions = ["VK_EXT_debug_report"]
 var vkExtensionsToRequest: seq[string]
-vkLog LTrace, "[AvailableExtensions]"
+vkLog LTrace, "[Extensions]"
 for extension in vkExtensions:
     let extensionName = charArrayToString(extension.extensionName)
     vkLog LTrace, "\t$# $#".format(extensionName, makeVulkanVersionInfo(extension.specVersion))
@@ -176,6 +176,39 @@ var
         , pfnCallback: vkDebugReportCallback)
     vkDebugCallback: VkDebugReportCallbackEXT
 vkCheck vkCreateDebugReportCallbackEXT(instance, addr vkCallbackCreateInfo, nil, addr vkDebugCallback)
+
+type
+    GPUVendor {.pure.} = enum
+        AMD, NVidia, Intel, ARM, Qualcomm, ImgTec, Unknown
+proc vkVendorIDToGPUVendor(vendorID: uint32): GPUVendor =
+    case vendorID:
+        of 0x1002: GPUVendor.AMD
+        of 0x10DE: GPUVendor.NVidia
+        of 0x8086: GPUVendor.Intel
+        of 0x13B5: GPUVendor.ARM
+        of 0x5143: GPUVendor.Qualcomm
+        of 0x1010: GPUVendor.ImgTec
+        else: GPUVendor.Unknown
+
+var 
+    vkDeviceCount: uint32
+    vkDevices: seq[VkPhysicalDevice]
+vkCheck vkEnumeratePhysicalDevices(instance, addr vkDeviceCount, nil)
+check vkDeviceCount != 0, "VK: failed to find any devices!"
+vkDevices.setLen(vkDeviceCount)
+vkCheck vkEnumeratePhysicalDevices(instance, addr vkDeviceCount, addr vkDevices[0])
+
+let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[id: VkPhysicalDevice, props: VkPhysicalDeviceProperties] =
+    var dp: VkPhysicalDeviceProperties
+    vkGetPhysicalDeviceProperties(device, addr dp)
+    (device, dp))
+let vkSelectedPhysicalDevice = vkDevicesWithProperties[0]
+vkLog LTrace, "[Devices]"
+for device in vkDevicesWithProperties:
+    vkLog LTrace, "\t" & charArrayToString(device[1].deviceName)
+    vkLog LTrace, "\t\tType $# API $# Driver $# Vendor $#".format(device.props.deviceType, makeVulkanVersionInfo(device.props.apiVersion), device.props.driverVersion, vkVendorIDToGPUVendor device.props.vendorID)
+vkLog LInfo, "Selected physical device: " & charArrayToString(vkSelectedPhysicalDevice.props.deviceName)
+
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
