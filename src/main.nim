@@ -36,6 +36,12 @@ proc sdlCheck(res: cint, msg = "") =
         sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
         quit QuitFailure
 
+proc sdlCheck(res: bool, msg = "") =
+    if not res:
+        if msg != "": sdlLog LCritical, msg
+        sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
+        quit QuitFailure
+
 proc vkCheck(res: VkResult, msg = "") =
     if res != VkResult.success:
         if msg != "": vkLog LCritical, msg
@@ -45,7 +51,7 @@ proc vkCheck(res: VkResult, msg = "") =
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
-sdlCheck sdl.init(0), "Failed to init :c"
+sdlCheck sdl.init(INIT_EVERYTHING), "Failed to init :c"
 
 var window: Window
 window = createWindow(
@@ -53,7 +59,7 @@ window = createWindow(
     , WINDOWPOS_UNDEFINED
     , WINDOWPOS_UNDEFINED
     , 640, 480
-    , WINDOW_SHOWN or WINDOW_RESIZABLE)
+    , WINDOW_VULKAN or WINDOW_SHOWN or WINDOW_RESIZABLE)
 if window == nil:
     sdlLog LCritical, "Failed to create window!"
     sdlLog LCritical, "Call Failed: " & $sdl.getError()
@@ -116,7 +122,15 @@ vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, nil)
 vkExtensions.setLen(vkExtensionCount)
 vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, addr vkExtensions[0])
 
-let vkDesiredExtensions = ["VK_EXT_debug_report"]
+var sdlVkExtensionCount: cuint
+sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, nil)
+var sdlVkExtensionsCStrings = cast[cstringArray](malloc(sizeof(cstring) * csize(sdlVkExtensionCount)))
+sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, sdlVkExtensionsCStrings)
+let sdlVkDesiredExtensions = cstringArrayToSeq(sdlVkExtensionsCStrings)
+free(sdlVkExtensionsCStrings)
+sdlLog LInfo, "SDL VK desired extensions: " & $sdlVkDesiredExtensions
+
+let vkDesiredExtensions = @["VK_EXT_debug_report"] & sdlVkDesiredExtensions
 var vkExtensionsToRequest: seq[string]
 vkLog LTrace, "[Extensions]"
 for extension in vkExtensions:
