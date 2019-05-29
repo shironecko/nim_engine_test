@@ -1,5 +1,6 @@
 import strutils
 import sequtils
+import sugar
 import sdl2/[sdl, sdl_syswm]
 import nim_logger as log
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
@@ -191,6 +192,9 @@ var
     vkDebugCallback: VkDebugReportCallbackEXT
 vkCheck vkCreateDebugReportCallbackEXT(instance, addr vkCallbackCreateInfo, nil, addr vkDebugCallback)
 
+var vkSurface: vk.VkSurfaceKHR
+sdlCheck vulkanCreateSurface(window, cast[sdl.VkInstance](instance), addr vkSurface)
+
 type
     GPUVendor {.pure.} = enum
         AMD, NVidia, Intel, ARM, Qualcomm, ImgTec, Unknown
@@ -212,17 +216,41 @@ check vkDeviceCount != 0, "VK: failed to find any devices!"
 vkDevices.setLen(vkDeviceCount)
 vkCheck vkEnumeratePhysicalDevices(instance, addr vkDeviceCount, addr vkDevices[0])
 
-let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[id: VkPhysicalDevice, props: VkPhysicalDeviceProperties] =
-    var dp: VkPhysicalDeviceProperties
-    vkGetPhysicalDeviceProperties(device, addr dp)
-    (device, dp))
-let vkSelectedPhysicalDevice = vkDevicesWithProperties[0]
+let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[
+        id: VkPhysicalDevice
+        , props: VkPhysicalDeviceProperties
+        , queues: seq[VkQueueFamilyProperties]
+        , presentQueueIdx: uint32
+    ] =
+    result.id = device
+    vkGetPhysicalDeviceProperties(device, addr result.props)
+
+    var queueFamiliesCount: uint32
+    vkGetPhysicalDeviceQueueFamilyProperties(device, addr queueFamiliesCount, nil)
+    result.queues.setLen(queueFamiliesCount)
+    vkGetPhysicalDeviceQueueFamilyProperties(device, addr queueFamiliesCount, addr result.queues[0])
+    result.presentQueueIdx = 0xFFFFFFFF'u32
+    for i, q in result.queues:
+        var surfaceSupported: VkBool32
+        vkCheck vkGetPhysicalDeviceSurfaceSupportKHR(device, uint32 i, vkSurface, addr surfaceSupported)
+        if (surfaceSupported == vkTrue) and ((q.queueFlags and VkFlags(VkQueueFlagBits.graphics)) == VkFlags(VkQueueFlagBits.graphics)):
+            result.presentQueueIdx = uint32 i
+            break
+)
+
 vkLog LTrace, "[Devices]"
 for device in vkDevicesWithProperties:
     vkLog LTrace, "\t" & charArrayToString(device[1].deviceName)
     vkLog LTrace, "\t\tType $# API $# Driver $# Vendor $#".format(device.props.deviceType, makeVulkanVersionInfo(device.props.apiVersion), device.props.driverVersion, vkVendorIDToGPUVendor device.props.vendorID)
+let vkCompatibleDevices = vkDevicesWithProperties.filter((d) => d.presentQueueIdx != 0xFFFFFFFF'u32)
+vkLog LInfo, "[Compatible Devices]"
+for device in vkCompatibleDevices:
+    vkLog LInfo, "\t" & charArrayToString(device.props.deviceName)
+if (vkCompatibleDevices.len == 0):
+    vkLog LCritical, "No compatible devices found!"
+    quit QuitFailure
+let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
 vkLog LInfo, "Selected physical device: " & charArrayToString(vkSelectedPhysicalDevice.props.deviceName)
-
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
