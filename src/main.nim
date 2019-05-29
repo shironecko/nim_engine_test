@@ -282,6 +282,80 @@ var
     vkDevice: VkDevice
 vkCheck vkCreateDevice(vkSelectedPhysicalDevice.id, addr deviceInfo, nil, addr vkDevice)
 
+var
+    formatCount: uint32
+    surfaceFormats: seq[VkSurfaceFormatKHR]
+vkCheck vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface, addr formatCount, nil)
+surfaceFormats.setLen(formatCount)
+vkCheck vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface, addr formatCount, addr surfaceFormats[0])
+vkLog LTrace, "[Surface Formats]"
+for fmt in surfaceFormats:
+    vkLog LTrace, "\t" & $fmt.format
+vkCheck surfaceFormats.len > 0, "No surface formats returned!"
+
+var colorFormat: VkFormat
+if formatCount == 1 and surfaceFormats[0].format == VkFormat.undefined:
+    colorFormat = VkFormat.b8g8r8a8Unorm
+else:
+    colorFormat = surfaceFormats[0].format
+let colorSpace = surfaceFormats[0].colorSpace
+vkLog LInfo, "Selected surface format: $#, colorspace: $#".format(colorFormat, colorSpace)
+
+var surfaceCapabilities: VkSurfaceCapabilitiesKHR
+vkCheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr surfaceCapabilities)
+var desiredImageCount = 2'u32
+if desiredImageCount < surfaceCapabilities.minImageCount: 
+    desiredImageCount = surfaceCapabilities.minImageCount
+elif surfaceCapabilities.maxImageCount != 0 and desiredImageCount > surfaceCapabilities.maxImageCount: 
+    desiredImageCount = surfaceCapabilities.maxImageCount
+vkLog LInfo, "Desired swapchain images: " & $desiredImageCount
+
+var surfaceResolution = surfaceCapabilities.currentExtent
+if surfaceResolution.width == 0xFFFFFFFF'u32:
+    surfaceResolution.width = 640
+    surfaceResolution.height = 480
+vkLog LInfo, "Surface resolution: " & $surfaceResolution
+
+var preTransform = surfaceCapabilities.currentTransform
+if (surfaceCapabilities.supportedTransforms and VkFlags(VkSurfaceTransformFlagBitsKHR.identity)) == VkFlags(VkSurfaceTransformFlagBitsKHR.identity):
+    preTransform = VkSurfaceTransformFlagBitsKHR.identity
+
+var 
+    presentModeCount: uint32
+    presentModes: seq[VkPresentModeKHR]
+vkCheck vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr presentModeCount, nil)
+presentModes.setLen(presentModeCount)
+vkCheck vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr presentModeCount, addr presentModes[0])
+vkLog LTrace, "Present modes: " & $presentModes
+var presentMode = VkPresentModeKHR.fifo
+for pm in presentModes:
+    if pm == VkPresentModeKHR.mailbox:
+        presentMode = VkPresentModeKHR.mailbox
+        break
+vkLog LInfo, "Selected present mode: " & $presentMode
+
+var
+    queueFamilyIndices = [vkSelectedPhysicalDevice.presentQueueIdx]
+    swapChainCreateInfo = VkSwapchainCreateInfoKHR(
+        sType: VkStructureType.swapchainCreateInfoKHR
+        , surface: vkSurface
+        , minImageCount: desiredImageCount
+        , imageFormat: colorFormat
+        , imageColorSpace: colorSpace
+        , imageExtent: surfaceResolution
+        , imageArrayLayers: 1
+        , imageUsage: VkFlags(VkImageUsageFlagBits.colorAttachment)
+        , imageSharingMode: VkSharingMode.exclusive
+        , queueFamilyIndexCount: uint32 queueFamilyIndices.len
+        , pQueueFamilyIndices: addr queueFamilyIndices[0]
+        , preTransform: preTransform
+        , compositeAlpha: VkCompositeAlphaFlagBitsKHR.opaque
+        , presentMode: presentMode
+        , clipped: vkTrue
+    )
+    swapChain: VkSwapchainKHR
+vkCheck vkCreateSwapchainKHR(vkSelectedPhysicalDevice.id, addr swapChainCreateInfo, nil, addr swapChain)
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
 
