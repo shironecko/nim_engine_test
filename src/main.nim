@@ -49,6 +49,12 @@ proc vkCheck(res: VkResult, msg = "") =
         vkLog LCritical, "Call failed: " & $res
         quit QuitFailure
 
+proc vkCheck(res: bool, msg = "") =
+    if not res:
+        if msg != "": vkLog LCritical, msg
+        vkLog LCritical, "Call failed: " & $res
+        quit QuitFailure
+
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
@@ -182,8 +188,9 @@ let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugR
 let
     vkCreateDebugReportCallbackEXT = cast[PFN_vkCreateDebugReportCallbackEXT](vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT"))
     vkDestroyDebugReportCallbackEXT = cast[PFN_vkDestroyDebugReportCallbackEXT](vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"))
-check vkCreateDebugReportCallbackEXT != nil, "VK: failed to load vkCreateDebugReportCallbackEXT proc!"
-check vkDestroyDebugReportCallbackEXT != nil, "VK: failed to load vkDestroyDebugReportCallbackEXT proc!"
+vkCheck vkCreateDebugReportCallbackEXT != nil, "Failed to load vkCreateDebugReportCallbackEXT proc!"
+vkCheck vkDestroyDebugReportCallbackEXT != nil, "Failed to load vkDestroyDebugReportCallbackEXT proc!"
+
 var 
     vkCallbackCreateInfo = VkDebugReportCallbackCreateInfoEXT(
         sType: VkStructureType.debugReportCallbackCreateInfoExt
@@ -252,6 +259,29 @@ if (vkCompatibleDevices.len == 0):
 let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
 vkLog LInfo, "Selected physical device: " & charArrayToString(vkSelectedPhysicalDevice.props.deviceName)
 
+var
+    queuePriorities = [1.0'f32]
+    queueCreateInfo = VkDeviceQueueCreateInfo(
+        sType: VkStructureType.deviceQueueCreateInfo
+        , queueFamilyIndex: vkSelectedPhysicalDevice.presentQueueIdx
+        , queueCount: 1
+        , pQueuePriorities: addr queuePriorities[0]
+    )
+    deviceExtensions = allocCStringArray(["VK_KHR_swapchain"])
+    deviceFeatures = VkPhysicalDeviceFeatures(
+        shaderClipDistance: vkTrue
+    )
+    deviceInfo = VkDeviceCreateInfo(
+        sType: VkStructureType.deviceCreateInfo
+        , queueCreateInfoCount: 1
+        , pQueueCreateInfos: addr queueCreateInfo
+        , enabledExtensionCount: 1
+        , ppEnabledExtensionNames: deviceExtensions
+        , pEnabledFeatures: addr deviceFeatures
+    )
+    vkDevice: VkDevice
+vkCheck vkCreateDevice(vkSelectedPhysicalDevice.id, addr deviceInfo, nil, addr vkDevice)
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
 
@@ -270,6 +300,7 @@ block GameLoop:
                     updateRenderResolution(newWindowDimensions)
                     windowDimentions = newWindowDimensions
 
+vkDestroyDevice(vkDevice, nil)
 vkDestroyDebugReportCallbackEXT(instance, vkDebugCallback, nil)
 vkDestroyInstance(instance, nil)
 destroyWindow(window)
