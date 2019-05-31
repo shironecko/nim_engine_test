@@ -2,63 +2,16 @@ import strutils
 import sequtils
 import sugar
 import sdl2/[sdl, sdl_syswm]
-import nim_logger as log
+import logging
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
-
-type
-    LogCategories = enum
-        LogGeneral = "G",
-        LogSDL = "SDL",
-        LogVulkan = "VK"
-
-registerLogCategory(log.LogCategory(name: $LogGeneral, level: LTrace))
-registerLogCategory(log.LogCategory(name: $LogSDL, level: LTrace))
-registerLogCategory(log.LogCategory(name: $LogVulkan, level: LTrace))
-registerLogProc(LogStandartProc.StdOut)
-
-proc gLog(level: LogLevel, msg: string) =
-    log $LogGeneral, level, msg
-
-proc sdlLog(level: LogLevel, msg: string) =
-    log $LogSDL, level, msg
-
-proc vkLog(level: LogLevel, msg: string) =
-    log $LogVulkan, level, msg
-
-proc check(condition: bool, msg = "") =
-    if not condition:
-        if msg != "": gLog LCritical, msg
-        gLog LCritical, "Check failed!"
-        quit QuitFailure
-
-proc sdlCheck(res: cint, msg = "") =
-    if res != 0:
-        if msg != "": sdlLog LCritical, msg
-        sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
-        quit QuitFailure
-
-proc sdlCheck(res: bool, msg = "") =
-    if not res:
-        if msg != "": sdlLog LCritical, msg
-        sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
-        quit QuitFailure
-
-proc vkCheck(res: VkResult, msg = "") =
-    if res != VkResult.success:
-        if msg != "": vkLog LCritical, msg
-        vkLog LCritical, "Call failed: " & $res
-        quit QuitFailure
-
-proc vkCheck(res: bool, msg = "") =
-    if not res:
-        if msg != "": vkLog LCritical, msg
-        vkLog LCritical, "Call failed: " & $res
-        quit QuitFailure
+import render_vulkan as rd
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
 sdlCheck sdl.init(INIT_EVERYTHING), "Failed to init :c"
+sdlCheck vulkanLoadLibrary(nil)
+loadVulkanAPI()
 
 var window: Window
 window = createWindow(
@@ -335,7 +288,6 @@ for pm in presentModes:
 vkLog LInfo, "Selected present mode: " & $presentMode
 
 var
-    queueFamilyIndices = [vkSelectedPhysicalDevice.presentQueueIdx]
     swapChainCreateInfo = VkSwapchainCreateInfoKHR(
         sType: VkStructureType.swapchainCreateInfoKHR
         , surface: vkSurface
@@ -346,8 +298,6 @@ var
         , imageArrayLayers: 1
         , imageUsage: VkFlags(VkImageUsageFlagBits.colorAttachment)
         , imageSharingMode: VkSharingMode.exclusive
-        , queueFamilyIndexCount: uint32 queueFamilyIndices.len
-        , pQueueFamilyIndices: addr queueFamilyIndices[0]
         , preTransform: preTransform
         , compositeAlpha: VkCompositeAlphaFlagBitsKHR.opaque
         , presentMode: presentMode
