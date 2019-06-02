@@ -6,6 +6,8 @@ import sdl2/[sdl, sdl_syswm]
 import logging
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
 
+var vkCreateInstance: PFN_vkCreateInstance
+
 proc getVulkanProcAddrGetterProc(): PFN_vkGetInstanceProcAddr {.inline.} = cast[PFN_vkGetInstanceProcAddr](vulkanGetVkGetInstanceProcAddr())
 
 proc loadVulkanProc[ProcType](procGetter: PFN_vkGetInstanceProcAddr, fnName: string): ProcType {.inline.} =
@@ -42,7 +44,6 @@ macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyp
     result = newStmtList(fnDeclarations, loadProc)
 
 generateVulkanAPILoader "loadVulkanAPI":
-    vkCreateInstance
     vkDestroyInstance
     vkEnumeratePhysicalDevices
     vkGetPhysicalDeviceFeatures
@@ -179,3 +180,35 @@ generateVulkanAPILoader "loadVulkanAPI":
     vkCmdNextSubpass
     vkCmdEndRenderPass
     vkCmdExecuteCommands
+    vkDestroySurfaceKHR
+    vkDestroySurfaceKHR
+    vkDestroySurfaceKHR
+    vkGetPhysicalDeviceSurfaceSupportKHR
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR
+    vkGetPhysicalDeviceSurfaceFormatsKHR
+    vkGetPhysicalDeviceSurfacePresentModesKHR
+    vkCreateSwapchainKHR
+    vkDestroySwapchainKHR
+    vkGetSwapchainImagesKHR
+    vkAcquireNextImageKHR
+    vkQueuePresentKHR
+    vkGetPhysicalDeviceDisplayPropertiesKHR
+    vkGetPhysicalDeviceDisplayPlanePropertiesKHR
+    vkGetDisplayPlaneSupportedDisplaysKHR
+    vkGetDisplayModePropertiesKHR
+    vkCreateDisplayModeKHR
+    vkGetDisplayPlaneCapabilitiesKHR
+    vkCreateDisplayPlaneSurfaceKHR
+    vkCreateSharedSwapchainsKHR
+    vkGetPhysicalDeviceFeatures2KHR
+    vkGetPhysicalDeviceProperties2KHR
+    vkGetPhysicalDeviceFormatProperties2KHR
+    vkGetPhysicalDeviceImageFormatProperties2KHR
+    vkGetPhysicalDeviceQueueFamilyProperties2KHR
+    vkGetPhysicalDeviceMemoryProperties2KHR
+    vkGetPhysicalDeviceSparseImageFormatProperties2KHR
+    vkTrimCommandPoolKHR
+    vkGetPhysicalDeviceExternalBufferPropertiesKHR
+    vkCreateDebugReportCallbackEXT
+    vkDestroyDebugReportCallbackEXT
+    vkDebugReportMessageEXT
