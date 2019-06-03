@@ -2,9 +2,9 @@ import strutils
 import sequtils
 import sugar
 import macros
-import sdl2/[sdl, sdl_syswm]
+import sdl2/sdl
 import logging
-import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
+import vulkan as vk
 
 proc getVulkanProcAddrGetterProc(): PFN_vkGetInstanceProcAddr {.inline.} = cast[PFN_vkGetInstanceProcAddr](vulkanGetVkGetInstanceProcAddr())
 
@@ -14,33 +14,35 @@ proc loadVulkanProc[ProcType](procGetter: PFN_vkGetInstanceProcAddr, vulkanInsta
     vkCheck result != nil, "Failed to load $# function!".format(fnName)
 
 macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyped =
-    var fnDeclarations = newNimNode(nnkVarSection)
-    for ident in usedFunctions:
-        ident.expectKind(nnkIdent)
-        let identType = "PFN_" & $ident
-        let fnDecl = newIdentDefs(postfix(ident, "*"), newIdentNode(identType))
-        fnDeclarations.add(fnDecl)
-    
-    var loadProcBody = newStmtList();
-    loadProcBody.add(newLetStmt(newIdentNode("getVkProc"), newCall(newIdentNode("getVulkanProcAddrGetterProc"))))
-    for ident in usedFunctions:
-        loadProcBody.add(
-            newAssignment(
-                ident
-                , newCall(
-                    newNimNode(nnkBracketExpr)
-                        .add(newIdentNode("loadVulkanProc"))
-                        .add(newIdentNode("PFN_" & $ident))
-                    , newIdentNode("getVkProc")
-                    , newIdentNode("vulkanInstance")
-                    , newStrLitNode($ident)
-                )
-            )
-        )
-    let vulkanInstanceParameter = newIdentDefs(newIdentNode("vulkanInstance"), newDotExpr(newIdentNode("vk"), newIdentNode("VkInstance")))
-    var loadProc = newProc(postfix(newIdentNode($loaderName), "*"), [newEmptyNode(), vulkanInstanceParameter], loadProcBody)
+    var
+        fnDeclarations = newStmtList()
+        fnLoadingCode = newStmtList()
+    let
+        fnLoaderIdent = ident "fnLoader"
+        vkInstanceParamIdent = ident "vulkanInstance"
+        apiLoaderFnIdent = ident $loaderName
 
-    result = newStmtList(fnDeclarations, loadProc)
+    fnLoadingCode.add quote do:
+        var `fnLoaderIdent`: PFN_vkGetInstanceProcAddr
+        `fnLoaderIdent` = getVulkanProcAddrGetterProc()
+    
+    for fn in usedFunctions:
+        fn.expectKind(nnkIdent)
+
+        let
+            fnName = toStrLit(fn)
+            fnType = ident("PFN_$#".format($fn))
+        fnDeclarations.add quote do:
+            var `fn`*: `fnType`
+        
+        fnLoadingCode.add quote do:
+            `fn` = loadVulkanProc[`fnType`](`fnLoaderIdent`, `vkInstanceParamIdent`, `fnName`)
+            vkCheck `fn` != nil, "Failed to load $# function!".format(`fnName`)
+    
+    var loaderFnDecl = quote do:
+            proc `apiLoaderFnIdent`*(`vkInstanceParamIdent`: vk.VkInstance) = `fnLoadingCode`
+    
+    newStmtList fnDeclarations, loaderFnDecl
 
 generateVulkanAPILoader "loadVulkanAPI":
     vkCreateInstance
