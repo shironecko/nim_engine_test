@@ -3,7 +3,7 @@ import sequtils
 import sugar
 import macros
 import sdl2/sdl
-import logging
+import ../log
 import vulkan as vk
 
 proc getVulkanProcAddrGetterProc(): PFN_vkGetInstanceProcAddr {.inline.} = cast[PFN_vkGetInstanceProcAddr](vulkanGetVkGetInstanceProcAddr())

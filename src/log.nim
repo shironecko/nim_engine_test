@@ -1,7 +1,7 @@
-import nim_logger as log
-export log
+import nim_logger
+export nim_logger
 
-import sdl2/sdl
+import sdl2/sdl except LogCategory
 import vulkan as vk
 
 type
@@ -10,9 +10,9 @@ type
         LogSDL = "SDL",
         LogVulkan = "VK"
 
-registerLogCategory(log.LogCategory(name: $LogGeneral, level: LTrace))
-registerLogCategory(log.LogCategory(name: $LogSDL, level: LTrace))
-registerLogCategory(log.LogCategory(name: $LogVulkan, level: LTrace))
+registerLogCategory(LogCategory(name: $LogGeneral, level: LTrace))
+registerLogCategory(LogCategory(name: $LogSDL, level: LTrace))
+registerLogCategory(LogCategory(name: $LogVulkan, level: LTrace))
 registerLogProc(LogStandartProc.StdOut)
 
 proc gLog*(level: LogLevel, msg: string) =

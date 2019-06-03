@@ -2,9 +2,9 @@ import strutils
 import sequtils
 import sugar
 import sdl2/[sdl, sdl_syswm]
-import logging
+import log
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
-import render_vulkan as rd
+import render/vulkan_loader
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
