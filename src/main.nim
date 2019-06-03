@@ -11,7 +11,7 @@ proc GetTime*(): float64 =
 
 sdlCheck sdl.init(INIT_EVERYTHING), "Failed to init :c"
 sdlCheck vulkanLoadLibrary(nil)
-loadVulkanAPI()
+loadVulkanAPI(cast[vk.VkInstance](nil))
 
 var window: Window
 window = createWindow(
@@ -82,12 +82,13 @@ vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, nil)
 vkExtensions.setLen(vkExtensionCount)
 vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, addr vkExtensions[0])
 
-var sdlVkExtensionCount: cuint
+var 
+    sdlVkExtensionCount: cuint
+    sdlVkExtensionsCStrings: seq[cstring]
 sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, nil)
-var sdlVkExtensionsCStrings = cast[cstringArray](malloc(sizeof(cstring) * csize(sdlVkExtensionCount)))
-sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, sdlVkExtensionsCStrings)
-let sdlVkDesiredExtensions = cstringArrayToSeq(sdlVkExtensionsCStrings)
-free(sdlVkExtensionsCStrings)
+sdlVkExtensionsCStrings.setLen(sdlVkExtensionCount)
+sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, cast[cstringArray](addr sdlVkExtensionsCStrings[0]))
+let sdlVkDesiredExtensions = sdlVkExtensionsCStrings.mapIt($it)
 sdlLog LInfo, "SDL VK desired extensions: " & $sdlVkDesiredExtensions
 
 let vkDesiredExtensions = @["VK_EXT_debug_report"] & sdlVkDesiredExtensions
@@ -128,6 +129,8 @@ vkCheck vkCreateInstance(addr instanceCreateInfo, nil, addr instance)
 deallocCStringArray(vkLayersCStrings)
 deallocCStringArray(vkExtensionsCStrings)
 
+loadVulkanInstanceAPI(instance)
+
 let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugReportFlagsEXT; objectType: VkDebugReportObjectTypeEXT; cbObject: uint64; location: csize; messageCode:  int32; pLayerPrefix: cstring; pMessage: cstring; pUserData: pointer): VkBool32 {.cdecl.} =
     var logLevel = LTrace
     if   (flags and uint32(VkDebugReportFlagBitsEXT.error)) != 0:               logLevel = LError
@@ -137,12 +140,6 @@ let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugR
     elif (flags and uint32(VkDebugReportFlagBitsEXT.debug)) != 0:               logLevel = LTrace
     vkLog logLevel, "$# $# $# $#".format(pLayerPrefix, objectType, messageCode, pMessage)
     vkFalse
-
-let
-    vkCreateDebugReportCallbackEXT = cast[PFN_vkCreateDebugReportCallbackEXT](vkGetInstanceProcAddr(instance, "vkCreateDebugReportCallbackEXT"))
-    vkDestroyDebugReportCallbackEXT = cast[PFN_vkDestroyDebugReportCallbackEXT](vkGetInstanceProcAddr(instance, "vkDestroyDebugReportCallbackEXT"))
-vkCheck vkCreateDebugReportCallbackEXT != nil, "Failed to load vkCreateDebugReportCallbackEXT proc!"
-vkCheck vkDestroyDebugReportCallbackEXT != nil, "Failed to load vkDestroyDebugReportCallbackEXT proc!"
 
 var 
     vkCallbackCreateInfo = VkDebugReportCallbackCreateInfoEXT(
@@ -234,6 +231,7 @@ var
     )
     vkDevice: VkDevice
 vkCheck vkCreateDevice(vkSelectedPhysicalDevice.id, addr deviceInfo, nil, addr vkDevice)
+deallocCStringArray(deviceExtensions)
 
 var
     formatCount: uint32
