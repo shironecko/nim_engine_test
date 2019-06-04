@@ -6,6 +6,16 @@ import sdl2/sdl except VkInstance, VkSurfaceKHR
 import ../log
 import vulkan as vk
 
+type
+    VulkanVersionInfo* = object
+        major*, minor*, patch*: uint
+
+proc makeVulkanVersionInfo*(apiVersion: uint): VulkanVersionInfo =
+    VulkanVersionInfo(
+        major: apiVersion shr 22
+        , minor: (apiVersion shr 12) and 0x3ff
+        , patch: apiVersion and 0xfff)
+
 proc getVulkanProcAddrGetterProc(): PFN_vkGetInstanceProcAddr {.inline.} = cast[PFN_vkGetInstanceProcAddr](vulkanGetVkGetInstanceProcAddr())
 
 proc loadVulkanProc[ProcType](procGetter: PFN_vkGetInstanceProcAddr, vulkanInstance: vk.VkInstance, fnName: string): ProcType {.inline.} =
@@ -44,7 +54,7 @@ macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyp
             vkCheck `fnIdent` != nil, "Failed to load $# function!".format(`fnCName`)
     
     var loaderFnDecl = quote do:
-        proc `apiLoaderFnIdent`*(`vkInstanceParamIdent`: vk.VkInstance) = `fnLoadingCode`
+        proc `apiLoaderFnIdent`*(`vkInstanceParamIdent`: VkInstance = cast[VkInstance](nil)) = `fnLoadingCode`
 
     newStmtList fnDeclarations, loaderFnDecl
 

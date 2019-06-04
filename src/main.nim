@@ -5,13 +5,14 @@ import sdl2/[sdl, sdl_syswm]
 import log
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
 import render/vulkan_wrapper
+import utility
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
 sdlCheck sdl.init(INIT_EVERYTHING), "Failed to init :c"
 sdlCheck vulkanLoadLibrary(nil)
-loadVulkanAPI(cast[vk.VkInstance](nil))
+loadVulkanAPI()
 
 var window: Window
 window = createWindow(
@@ -20,10 +21,7 @@ window = createWindow(
     , WINDOWPOS_UNDEFINED
     , 640, 480
     , WINDOW_VULKAN or WINDOW_SHOWN or WINDOW_RESIZABLE)
-if window == nil:
-    sdlLog LCritical, "Failed to create window!"
-    sdlLog LCritical, "Call Failed: " & $sdl.getError()
-    quit QuitFailure
+sdlCheck window != nil, "Failed to create window!"
 
 type
     WindowDimentions = object
@@ -35,41 +33,26 @@ proc getWindowDimentions(window : sdl.Window) : WindowDimentions =
 
 var windowDimentions = getWindowDimentions(window)
 
-type
-    VulkanVersionInfo = object
-        major, minor, patch: uint
-proc makeVulkanVersionInfo(apiVersion: uint): VulkanVersionInfo =
-    VulkanVersionInfo(
-        major: apiVersion shr 22
-        , minor: (apiVersion shr 12) and 0x3ff
-        , patch: apiVersion and 0xfff)
 proc `$`(vkVersion: VulkanVersionInfo): string = "$#.$#.$#".format(vkVersion.major, vkVersion.minor, vkVersion.patch)
-let vkVersionInfo = makeVulkanVersionInfo(vkApiVersion10)
+let vkVersionInfo = makeVulkanVersionInfo vkApiVersion10
 vkLog LInfo, "Vulkan API Version: " & $vkVersionInfo
 vkLog LInfo, "Vulkan Header Version: $#" % [$vkHeaderVersion]
 
-let vkAvailableLayers = vkEnumerateInstanceLayerProperties()
-
-proc charArrayToString[LEN](charArr: array[LEN, char]): string =
-    for c in charArr:
-        if c == '\0': break
-        result &= c
-
-let vkDesiredLayers = ["VK_LAYER_LUNARG_standard_validation"]
-var vkLayersToRequest: seq[string]
+let 
+    vkAvailableLayers = vkEnumerateInstanceLayerProperties()
+    vkAvailableLayerNames = vkAvailableLayers.mapIt charArrayToString(it.layerName)
+    vkDesiredLayerNames = @["VK_LAYER_LUNARG_standard_validation"]
+    vkLayerNamesToRequest = vkAvailableLayerNames.intersect vkDesiredLayerNames
 vkLog LTrace, "[Layers]"
 for layer in vkAvailableLayers:
-    let layerName = charArrayToString(layer.layerName)
-    vkLog LTrace, "\t$# ($#, $#)".format(layerName, makeVulkanVersionInfo(layer.specVersion), layer.implementationVersion)
-    vkLog LTrace, "\t" & charArrayToString(layer.description)
+    let layerName = charArrayToString layer.layerName
+    vkLog LTrace, "\t$# ($#, $#)".format(layerName, makeVulkanVersionInfo layer.specVersion, layer.implementationVersion)
+    vkLog LTrace, "\t" & charArrayToString layer.description
     vkLog LTrace, ""
 
-    if vkDesiredLayers.contains(layerName): vkLayersToRequest.add(layerName)
-let vkNotFoundLayers = vkDesiredLayers.filterIt(not vkLayersToRequest.contains(it))
-if vkNotFoundLayers.len() != 0: vkLog LWarning, "Requested layers not found: " & $vkNotFoundLayers
-vkLog LInfo, "Requesting layers: " & $vkLayersToRequest
-
-let vkExtensions = vkEnumerateInstanceExtensionProperties(nil)
+let vkNotFoundLayerNames = vkDesiredLayerNames.filterIt(not vkLayerNamesToRequest.contains(it))
+if vkNotFoundLayerNames.len() != 0: vkLog LWarning, "Requested layers not found: " & $vkNotFoundLayerNames
+vkLog LInfo, "Requesting layers: " & $vkLayerNamesToRequest
 
 var 
     sdlVkExtensionCount: cuint
@@ -78,45 +61,51 @@ sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, nil)
 sdlVkExtensionsCStrings.setLen(sdlVkExtensionCount)
 sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, cast[cstringArray](addr sdlVkExtensionsCStrings[0]))
 let sdlVkDesiredExtensions = sdlVkExtensionsCStrings.mapIt($it)
-sdlLog LInfo, "SDL VK desired extensions: " & $sdlVkDesiredExtensions
+sdlLog LInfo, "SDL VK required extensions: " & $sdlVkDesiredExtensions
 
-let vkDesiredExtensions = @["VK_EXT_debug_report"] & sdlVkDesiredExtensions
-var vkExtensionsToRequest: seq[string]
+# TODO: move to debug utils
+let 
+    vkDesiredExtensionNames = @["VK_EXT_debug_report"] & sdlVkDesiredExtensions
+    vkAvailableExtensions = vkEnumerateInstanceExtensionProperties(nil)
+    vkAvailableExtensionNames = vkAvailableExtensions.mapIt charArrayToString(it.extensionName)
+    vkExtensionNamesToRequest = vkAvailableExtensionNames.intersect vkDesiredExtensionNames
 vkLog LTrace, "[Extensions]"
-for extension in vkExtensions:
+for extension in vkAvailableExtensions:
     let extensionName = charArrayToString(extension.extensionName)
     vkLog LTrace, "\t$# $#".format(extensionName, makeVulkanVersionInfo(extension.specVersion))
 
-    if vkDesiredExtensions.contains(extensionName): vkExtensionsToRequest.add(extensionName)
-let vkNotFoundExtensions = vkDesiredExtensions.filterIt(not vkExtensionsToRequest.contains(it))
+let vkNotFoundExtensions = vkDesiredExtensionNames.filterIt(not vkExtensionNamesToRequest.contains(it))
 if vkNotFoundExtensions.len() != 0: vkLog LWarning, "Requested extensions not found: " & $vkNotFoundExtensions
-vkLog LInfo, "Requesting extensions: " & $vkExtensionsToRequest
-
-var appInfo = VkApplicationInfo(
-    sType: VkStructureType.applicationInfo
-    , pNext: nil
-    , pApplicationName: "Nim Vulkan"
-    , applicationVersion: 1
-    , pEngineName: "Dunno"
-    , engineVersion: 1
-    , apiVersion: vkVersion10)
-
-let vkLayersCStrings = allocCStringArray(vkLayersToRequest)
-let vkExtensionsCStrings = allocCStringArray(vkExtensionsToRequest)
-var instanceCreateInfo = VkInstanceCreateInfo(
-    sType: VkStructureType.instanceCreateInfo
-    , pNext: nil
-    , flags: 0
-    , pApplicationInfo: addr appInfo
-    , enabledLayerCount: uint32 vkLayersToRequest.len()
-    , ppEnabledLayerNames: vkLayersCStrings
-    , enabledExtensionCount: uint32 vkExtensionsToRequest.len()
-    , ppEnabledExtensionNames: vkExtensionsCStrings)
+vkLog LInfo, "Requesting extensions: " & $vkExtensionNamesToRequest
 
 var instance: vk.VkInstance
-vkCheck vkCreateInstance(addr instanceCreateInfo, nil, addr instance)
-deallocCStringArray(vkLayersCStrings)
-deallocCStringArray(vkExtensionsCStrings)
+block CreateVulkanInstance:
+    let 
+        vkLayersCStrings = allocCStringArray(vkLayerNamesToRequest)
+        vkExtensionsCStrings = allocCStringArray(vkExtensionNamesToRequest)
+    defer: 
+        deallocCStringArray(vkLayersCStrings)
+        deallocCStringArray(vkExtensionsCStrings)
+    
+    let 
+        appInfo = VkApplicationInfo(
+            sType: VkStructureType.applicationInfo
+            , pNext: nil
+            , pApplicationName: "Nim Vulkan"
+            , applicationVersion: 1
+            , pEngineName: "Dunno"
+            , engineVersion: 1
+            , apiVersion: vkVersion10)
+        instanceCreateInfo = VkInstanceCreateInfo(
+            sType: VkStructureType.instanceCreateInfo
+            , pNext: nil
+            , flags: 0
+            , pApplicationInfo: unsafeAddr appInfo
+            , enabledLayerCount: uint32 vkLayerNamesToRequest.len()
+            , ppEnabledLayerNames: vkLayersCStrings
+            , enabledExtensionCount: uint32 vkExtensionNamesToRequest.len()
+            , ppEnabledExtensionNames: vkExtensionsCStrings)
+    vkCheck vkCreateInstance(unsafeAddr instanceCreateInfo, nil, addr instance)
 
 loadVulkanInstanceAPI(instance)
 
@@ -256,8 +245,7 @@ for pm in presentModes:
         break
 vkLog LInfo, "Selected present mode: " & $presentMode
 
-var
-    swapChainCreateInfo = VkSwapchainCreateInfoKHR(
+let swapChainCreateInfo = VkSwapchainCreateInfoKHR(
         sType: VkStructureType.swapchainCreateInfoKHR
         , surface: vkSurface
         , minImageCount: desiredImageCount
@@ -272,8 +260,8 @@ var
         , presentMode: presentMode
         , clipped: vkTrue
     )
-    swapChain: VkSwapchainKHR
-vkCheck vkCreateSwapchainKHR(vkSelectedPhysicalDevice.id, addr swapChainCreateInfo, nil, addr swapChain)
+var swapChain: VkSwapchainKHR
+vkCheck vkCreateSwapchainKHR(vkSelectedPhysicalDevice.id, unsafeAddr swapChainCreateInfo, nil, addr swapChain)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
