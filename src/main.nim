@@ -4,7 +4,7 @@ import sugar
 import sdl2/[sdl, sdl_syswm]
 import log
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
-import render/vulkan_loader
+import render/vulkan_wrapper
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
@@ -48,13 +48,7 @@ let vkVersionInfo = makeVulkanVersionInfo(vkApiVersion10)
 vkLog LInfo, "Vulkan API Version: " & $vkVersionInfo
 vkLog LInfo, "Vulkan Header Version: $#" % [$vkHeaderVersion]
 
-var
-    vkLayerCount: uint32
-    vkAvailableLayers: seq[VkLayerProperties]
-
-vkCheck vkEnumerateInstanceLayerProperties(addr vkLayerCount, nil)
-vkAvailableLayers.setLen(vkLayerCount)
-vkCheck vkEnumerateInstanceLayerProperties(addr vkLayerCount, addr vkAvailableLayers[0])
+let vkAvailableLayers = vkEnumerateInstanceLayerProperties()
 
 proc charArrayToString[LEN](charArr: array[LEN, char]): string =
     for c in charArr:
