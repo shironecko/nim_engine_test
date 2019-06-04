@@ -69,12 +69,7 @@ let vkNotFoundLayers = vkDesiredLayers.filterIt(not vkLayersToRequest.contains(i
 if vkNotFoundLayers.len() != 0: vkLog LWarning, "Requested layers not found: " & $vkNotFoundLayers
 vkLog LInfo, "Requesting layers: " & $vkLayersToRequest
 
-var 
-    vkExtensionCount: uint32
-    vkExtensions: seq[VkExtensionProperties]
-vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, nil)
-vkExtensions.setLen(vkExtensionCount)
-vkCheck vkEnumerateInstanceExtensionProperties(nil, addr vkExtensionCount, addr vkExtensions[0])
+let vkExtensions = vkEnumerateInstanceExtensionProperties(nil)
 
 var 
     sdlVkExtensionCount: cuint

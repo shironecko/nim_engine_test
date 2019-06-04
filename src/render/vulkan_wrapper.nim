@@ -51,7 +51,7 @@ macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyp
 generateVulkanAPILoader "loadVulkanAPI":
     vkCreateInstance
     vkEnumerateInstanceLayerProperties: vkEnumerateInstanceLayerPropertiesRaw
-    vkEnumerateInstanceExtensionProperties
+    vkEnumerateInstanceExtensionProperties: vkEnumerateInstanceExtensionPropertiesRaw
 
 generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyInstance
@@ -96,4 +96,39 @@ macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, 
             vkCheck `fnToWrap`(addr elementsCount, addr elements[0])
             elements
 
+macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed, additionalArgs: untyped): untyped =
+    fnToWrap.expectKind nnkSym
+    wrapperFnName.expectKind nnkIdent
+    arrayElemType.expectKind nnkSym
+
+    let
+        elementsCountIdent = ident "elementsCount"
+        elementCountAddrCommand = newNimNode(nnkCommand).add(ident "addr").add(elementsCountIdent)
+        elementsIdent = ident "elements"
+        returnType = quote do:
+            seq[`arrayElemType`]
+        fnArgs = additionalArgs.foldl(a & newIdentDefs(b[0], b[1][0]), @[returnType])
+        wrappedFnDryCall = additionalArgs.foldl(a.add(b[0]), newNimNode(nnkCall).add(fnToWrap)).add(elementCountAddrCommand).add(newNilLit())
+        additionalArgsIdents = additionalArgs.mapIt(it[0])
+        additionalArgsDefs = additionalArgs.mapIt(newIdentDefs(it[0], it[1][0]))
+    
+    var wrappedFnCall = copyNimTree(wrappedFnDryCall)
+    wrappedFnCall[^1] = quote do:
+        addr `elementsIdent`[0]
+
+    let 
+        fnBody = quote do:
+            var 
+                `elementsCountIdent`: uint32
+                `elementsIdent`: `returnType`
+            vkCheck `wrappedFnDryCall`
+            elements.setLen(elementsCount)
+            vkCheck `wrappedFnCall`
+            elements
+        fnDecl = newProc(postfix(wrapperFnName, "*"), fnArgs, fnBody)
+    echo treeRepr(fnDecl)
+    fnDecl
+
 generateVulkanArrayGetterWrapper vkEnumerateInstanceLayerPropertiesRaw, vkEnumerateInstanceLayerProperties, VkLayerProperties
+generateVulkanArrayGetterWrapper vkEnumerateInstanceExtensionPropertiesRaw, vkEnumerateInstanceExtensionProperties, VkExtensionProperties:
+    pLayerName: cstring
