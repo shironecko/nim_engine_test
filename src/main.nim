@@ -78,7 +78,7 @@ let vkNotFoundExtensions = vkDesiredExtensionNames.filterIt(not vkExtensionNames
 if vkNotFoundExtensions.len() != 0: vkLog LWarning, "Requested extensions not found: " & $vkNotFoundExtensions
 vkLog LInfo, "Requesting extensions: " & $vkExtensionNamesToRequest
 
-var instance: vk.VkInstance
+var vkInstance: vk.VkInstance
 block CreateVulkanInstance:
     let 
         vkLayersCStrings = allocCStringArray(vkLayerNamesToRequest)
@@ -105,30 +105,31 @@ block CreateVulkanInstance:
             , ppEnabledLayerNames: vkLayersCStrings
             , enabledExtensionCount: uint32 vkExtensionNamesToRequest.len()
             , ppEnabledExtensionNames: vkExtensionsCStrings)
-    vkCheck vkCreateInstance(unsafeAddr instanceCreateInfo, nil, addr instance)
+    vkCheck vkCreateInstance(unsafeAddr instanceCreateInfo, nil, addr vkInstance)
 
-loadVulkanInstanceAPI(instance)
+loadVulkanInstanceAPI(vkInstance)
 
-let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugReportFlagsEXT; objectType: VkDebugReportObjectTypeEXT; cbObject: uint64; location: csize; messageCode:  int32; pLayerPrefix: cstring; pMessage: cstring; pUserData: pointer): VkBool32 {.cdecl.} =
-    var logLevel = LTrace
-    if   (flags and uint32(VkDebugReportFlagBitsEXT.error)) != 0:               logLevel = LError
-    elif (flags and uint32(VkDebugReportFlagBitsEXT.warning)) != 0:             logLevel = LWarning
-    elif (flags and uint32(VkDebugReportFlagBitsEXT.performanceWarning)) != 0:  logLevel = LWarning
-    elif (flags and uint32(VkDebugReportFlagBitsEXT.information)) != 0:         logLevel = LInfo
-    elif (flags and uint32(VkDebugReportFlagBitsEXT.debug)) != 0:               logLevel = LTrace
-    vkLog logLevel, "$# $# $# $#".format(pLayerPrefix, objectType, messageCode, pMessage)
-    vkFalse
+var vkDebugCallback: VkDebugReportCallbackEXT
+block SetupVulkanDebugCallback:
+    let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugReportFlagsEXT; objectType: VkDebugReportObjectTypeEXT; cbObject: uint64; location: csize; messageCode:  int32; pLayerPrefix: cstring; pMessage: cstring; pUserData: pointer): VkBool32 {.cdecl.} =
+        var logLevel = LTrace
+        if   maskCheck(flags, VkDebugReportFlagBitsEXT.error):              logLevel = LError
+        elif maskCheck(flags, VkDebugReportFlagBitsEXT.warning):            logLevel = LWarning
+        elif maskCheck(flags, VkDebugReportFlagBitsEXT.performanceWarning): logLevel = LWarning
+        elif maskCheck(flags, VkDebugReportFlagBitsEXT.information):        logLevel = LInfo
+        elif maskCheck(flags, VkDebugReportFlagBitsEXT.debug):              logLevel = LTrace
+        vkLog logLevel, "$# $# $# $#".format(pLayerPrefix, objectType, messageCode, pMessage)
+        vkFalse
 
-var 
-    vkCallbackCreateInfo = VkDebugReportCallbackCreateInfoEXT(
-        sType: VkStructureType.debugReportCallbackCreateInfoExt
-        , flags: uint32(VkDebugReportFlagBitsEXT.error) or uint32(VkDebugReportFlagBitsEXT.warning) or uint32(VkDebugReportFlagBitsEXT.performanceWarning)
-        , pfnCallback: vkDebugReportCallback)
-    vkDebugCallback: VkDebugReportCallbackEXT
-vkCheck vkCreateDebugReportCallbackEXT(instance, addr vkCallbackCreateInfo, nil, addr vkDebugCallback)
+    let 
+        vkCallbackCreateInfo = VkDebugReportCallbackCreateInfoEXT(
+            sType: VkStructureType.debugReportCallbackCreateInfoExt
+            , flags: uint32 maskCombine(VkDebugReportFlagBitsEXT.error, VkDebugReportFlagBitsEXT.warning, VkDebugReportFlagBitsEXT.performanceWarning)
+            , pfnCallback: vkDebugReportCallback)
+    vkCheck vkCreateDebugReportCallbackEXT(vkInstance, unsafeAddr vkCallbackCreateInfo, nil, addr vkDebugCallback)
 
 var vkSurface: vk.VkSurfaceKHR
-sdlCheck vulkanCreateSurface(window, cast[sdl.VkInstance](instance), addr vkSurface)
+sdlCheck vulkanCreateSurface(window, cast[sdl.VkInstance](vkInstance), addr vkSurface)
 
 type
     GPUVendor {.pure.} = enum
@@ -143,7 +144,7 @@ proc vkVendorIDToGPUVendor(vendorID: uint32): GPUVendor =
         of 0x1010: GPUVendor.ImgTec
         else: GPUVendor.Unknown
 
-let vkDevices = vkEnumeratePhysicalDevices(instance)
+let vkDevices = vkEnumeratePhysicalDevices(vkInstance)
 check vkDevices.len() != 0, "VK: failed to find any devices!"
 
 let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[
@@ -160,7 +161,7 @@ let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tup
     for i, q in result.queues:
         var surfaceSupported: VkBool32
         vkCheck vkGetPhysicalDeviceSurfaceSupportKHR(device, uint32 i, vkSurface, addr surfaceSupported)
-        if (surfaceSupported == vkTrue) and ((q.queueFlags and VkFlags(VkQueueFlagBits.graphics)) == VkFlags(VkQueueFlagBits.graphics)):
+        if (surfaceSupported == vkTrue) and maskCheck(q.queueFlags, VkQueueFlagBits.graphics):
             result.presentQueueIdx = uint32 i
             break
 )
@@ -233,7 +234,7 @@ if surfaceResolution.width == 0xFFFFFFFF'u32:
 vkLog LInfo, "Surface resolution: " & $surfaceResolution
 
 var preTransform = surfaceCapabilities.currentTransform
-if (surfaceCapabilities.supportedTransforms and VkFlags(VkSurfaceTransformFlagBitsKHR.identity)) == VkFlags(VkSurfaceTransformFlagBitsKHR.identity):
+if maskCheck(surfaceCapabilities.supportedTransforms, VkSurfaceTransformFlagBitsKHR.identity):
     preTransform = VkSurfaceTransformFlagBitsKHR.identity
 
 let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface)
@@ -283,7 +284,7 @@ block GameLoop:
 
 vkDestroySwapchainKHR(vkDevice, swapChain, nil)
 vkDestroyDevice(vkDevice, nil)
-vkDestroyDebugReportCallbackEXT(instance, vkDebugCallback, nil)
-vkDestroyInstance(instance, nil)
+vkDestroyDebugReportCallbackEXT(vkInstance, vkDebugCallback, nil)
+vkDestroyInstance(vkInstance, nil)
 destroyWindow(window)
 sdl.quit()
