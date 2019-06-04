@@ -154,13 +154,8 @@ proc vkVendorIDToGPUVendor(vendorID: uint32): GPUVendor =
         of 0x1010: GPUVendor.ImgTec
         else: GPUVendor.Unknown
 
-var 
-    vkDeviceCount: uint32
-    vkDevices: seq[VkPhysicalDevice]
-vkCheck vkEnumeratePhysicalDevices(instance, addr vkDeviceCount, nil)
-check vkDeviceCount != 0, "VK: failed to find any devices!"
-vkDevices.setLen(vkDeviceCount)
-vkCheck vkEnumeratePhysicalDevices(instance, addr vkDeviceCount, addr vkDevices[0])
+let vkDevices = vkEnumeratePhysicalDevices(instance)
+check vkDevices.len() != 0, "VK: failed to find any devices!"
 
 let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[
         id: VkPhysicalDevice
@@ -171,10 +166,7 @@ let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tup
     result.id = device
     vkGetPhysicalDeviceProperties(device, addr result.props)
 
-    var queueFamiliesCount: uint32
-    vkGetPhysicalDeviceQueueFamilyProperties(device, addr queueFamiliesCount, nil)
-    result.queues.setLen(queueFamiliesCount)
-    vkGetPhysicalDeviceQueueFamilyProperties(device, addr queueFamiliesCount, addr result.queues[0])
+    result.queues = vkGetPhysicalDeviceQueueFamilyProperties(device)
     result.presentQueueIdx = 0xFFFFFFFF'u32
     for i, q in result.queues:
         var surfaceSupported: VkBool32
@@ -222,19 +214,14 @@ var
 vkCheck vkCreateDevice(vkSelectedPhysicalDevice.id, addr deviceInfo, nil, addr vkDevice)
 deallocCStringArray(deviceExtensions)
 
-var
-    formatCount: uint32
-    surfaceFormats: seq[VkSurfaceFormatKHR]
-vkCheck vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface, addr formatCount, nil)
-surfaceFormats.setLen(formatCount)
-vkCheck vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface, addr formatCount, addr surfaceFormats[0])
+let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface)
 vkLog LTrace, "[Surface Formats]"
 for fmt in surfaceFormats:
     vkLog LTrace, "\t" & $fmt.format
 vkCheck surfaceFormats.len > 0, "No surface formats returned!"
 
 var colorFormat: VkFormat
-if formatCount == 1 and surfaceFormats[0].format == VkFormat.undefined:
+if surfaceFormats.len() == 1 and surfaceFormats[0].format == VkFormat.undefined:
     colorFormat = VkFormat.b8g8r8a8Unorm
 else:
     colorFormat = surfaceFormats[0].format
@@ -260,12 +247,7 @@ var preTransform = surfaceCapabilities.currentTransform
 if (surfaceCapabilities.supportedTransforms and VkFlags(VkSurfaceTransformFlagBitsKHR.identity)) == VkFlags(VkSurfaceTransformFlagBitsKHR.identity):
     preTransform = VkSurfaceTransformFlagBitsKHR.identity
 
-var 
-    presentModeCount: uint32
-    presentModes: seq[VkPresentModeKHR]
-vkCheck vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr presentModeCount, nil)
-presentModes.setLen(presentModeCount)
-vkCheck vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr presentModeCount, addr presentModes[0])
+let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface)
 vkLog LTrace, "Present modes: " & $presentModes
 var presentMode = VkPresentModeKHR.fifo
 for pm in presentModes:
@@ -311,6 +293,7 @@ block GameLoop:
                     updateRenderResolution(newWindowDimensions)
                     windowDimentions = newWindowDimensions
 
+vkDestroySwapchainKHR(vkDevice, swapChain, nil)
 vkDestroyDevice(vkDevice, nil)
 vkDestroyDebugReportCallbackEXT(instance, vkDebugCallback, nil)
 vkDestroyInstance(instance, nil)

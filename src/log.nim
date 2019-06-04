@@ -58,3 +58,6 @@ proc vkCheck*(res: bool, msg = "") =
         vkLog LCritical, "Call failed: " & $res
         writeStackTrace()
         quit QuitFailure
+
+macro vkCheck*(voidStatement: typed): untyped =
+    voidStatement

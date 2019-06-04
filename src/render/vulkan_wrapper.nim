@@ -2,7 +2,7 @@ import strutils
 import sequtils
 import sugar
 import macros
-import sdl2/sdl except VkInstance
+import sdl2/sdl except VkInstance, VkSurfaceKHR
 import ../log
 import vulkan as vk
 
@@ -55,31 +55,19 @@ generateVulkanAPILoader "loadVulkanAPI":
 
 generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyInstance
-    vkEnumeratePhysicalDevices
+    vkEnumeratePhysicalDevices: vkEnumeratePhysicalDevicesRaw
     vkGetPhysicalDeviceProperties
-    vkGetPhysicalDeviceQueueFamilyProperties
+    vkGetPhysicalDeviceQueueFamilyProperties: vkGetPhysicalDeviceQueueFamilyPropertiesRaw
     vkCreateDevice
     vkDestroyDevice
     vkGetPhysicalDeviceSurfaceSupportKHR
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR
-    vkGetPhysicalDeviceSurfaceFormatsKHR
-    vkGetPhysicalDeviceSurfacePresentModesKHR
+    vkGetPhysicalDeviceSurfaceFormatsKHR: vkGetPhysicalDeviceSurfaceFormatsKHRRaw
+    vkGetPhysicalDeviceSurfacePresentModesKHR: vkGetPhysicalDeviceSurfacePresentModesKHRRaw
     vkCreateSwapchainKHR
     vkDestroySwapchainKHR
     vkCreateDebugReportCallbackEXT
     vkDestroyDebugReportCallbackEXT
-
-# proc vkEnumerateInstanceLayerPropertiesWrapper(): seq[VkLayerProperties] =
-#     var vkLayerCount: uint32
-#     vkCheck vkEnumerateInstanceLayerProperties(addr vkLayerCount, nil)
-#     result.setLen(vkLayerCount)
-#     vkCheck vkEnumerateInstanceLayerProperties(addr vkLayerCount, addr result[0])
-
-# proc vkEnumerateInstanceExtensionPropertiesWrapper(layerName: cstring): seq[VkExtensionProperties] =
-#     var vkExtensionCount: uint32
-#     vkCheck vkEnumerateInstanceExtensionProperties(layerName, addr vkExtensionCount, nil)
-#     result.setLen(vkExtensionCount)
-#     vkCheck vkEnumerateInstanceExtensionProperties(layerName, addr vkExtensionCount, addr result[0])
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym
@@ -126,9 +114,18 @@ macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, 
             vkCheck `wrappedFnCall`
             elements
         fnDecl = newProc(postfix(wrapperFnName, "*"), fnArgs, fnBody)
-    echo treeRepr(fnDecl)
     fnDecl
 
 generateVulkanArrayGetterWrapper vkEnumerateInstanceLayerPropertiesRaw, vkEnumerateInstanceLayerProperties, VkLayerProperties
 generateVulkanArrayGetterWrapper vkEnumerateInstanceExtensionPropertiesRaw, vkEnumerateInstanceExtensionProperties, VkExtensionProperties:
     pLayerName: cstring
+generateVulkanArrayGetterWrapper vkEnumeratePhysicalDevicesRaw, vkEnumeratePhysicalDevices, VkPhysicalDevice:
+    instance: VkInstance
+generateVulkanArrayGetterWrapper vkGetPhysicalDeviceQueueFamilyPropertiesRaw, vkGetPhysicalDeviceQueueFamilyProperties, VkQueueFamilyProperties:
+    device: VkPhysicalDevice
+generateVulkanArrayGetterWrapper vkGetPhysicalDeviceSurfaceFormatsKHRRaw, vkGetPhysicalDeviceSurfaceFormatsKHR, VkSurfaceFormatKHR:
+    device: VkPhysicalDevice
+    surface: VkSurfaceKHR
+generateVulkanArrayGetterWrapper vkGetPhysicalDeviceSurfacePresentModesKHRRaw, vkGetPhysicalDeviceSurfacePresentModesKHR, VkPresentModeKHR:
+    device: VkPhysicalDevice
+    surface: VkSurfaceKHR
