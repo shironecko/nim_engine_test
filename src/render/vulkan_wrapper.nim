@@ -1,6 +1,7 @@
 import strutils
 import sequtils
 import sugar
+import strformat
 import macros
 import sdl2/sdl except VkInstance, VkSurfaceKHR
 import ../log
@@ -16,12 +17,14 @@ proc makeVulkanVersionInfo*(apiVersion: uint): VulkanVersionInfo =
         , minor: (apiVersion shr 12) and 0x3ff
         , patch: apiVersion and 0xfff)
 
+proc `$`*(vkVersion: VulkanVersionInfo): string = &"{vkVersion.major}.{vkVersion.minor}.{vkVersion.patch}"
+
 proc getVulkanProcAddrGetterProc(): PFN_vkGetInstanceProcAddr {.inline.} = cast[PFN_vkGetInstanceProcAddr](vulkanGetVkGetInstanceProcAddr())
 
 proc loadVulkanProc[ProcType](procGetter: PFN_vkGetInstanceProcAddr, vulkanInstance: vk.VkInstance, fnName: string): ProcType {.inline.} =
     let getterProc = procGetter(vulkanInstance, fnName)
     result = cast[ProcType](getterProc)
-    vkCheck result != nil, "Failed to load $# function!".format(fnName)
+    vkCheck result != nil, &"Failed to load {fnName} function!"
 
 macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyped =
     var
@@ -44,7 +47,7 @@ macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyp
             fnIdent = if fnHasCustomName: fn[1][0] else: fn
             fnCName = if fnHasCustomName: toStrLit(fn[0]) else: toStrLit(fnIdent)
             fnName = toStrLit(fnIdent)
-            fnType = ident("PFN_$#".format($fnCName))
+            fnType = ident(&"PFN_{fnCName}")
         
         fnDeclarations.add quote do:
             var `fnIdent`*: `fnType`

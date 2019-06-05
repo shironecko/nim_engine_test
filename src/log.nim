@@ -1,3 +1,4 @@
+import strformat
 import nim_logger
 export nim_logger
 
@@ -34,28 +35,28 @@ proc check*(condition: bool, msg = "") =
 proc sdlCheck*(res: cint, msg = "") =
     if res != 0:
         if msg != "": sdlLog LCritical, msg
-        sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
+        sdlLog LCritical, &"SDL Call Failed: {sdl.getError()}"
         writeStackTrace()
         quit QuitFailure
 
 proc sdlCheck*(res: bool, msg = "") =
     if not res:
         if msg != "": sdlLog LCritical, msg
-        sdlLog LCritical, "SDL Call Failed: " & $sdl.getError()
+        sdlLog LCritical, &"SDL Call Failed: {sdl.getError()}"
         writeStackTrace()
         quit QuitFailure
 
 proc vkCheck*(res: VkResult, msg = "") =
     if res != VkResult.success:
         if msg != "": vkLog LCritical, msg
-        vkLog LCritical, "Call failed: " & $res
+        vkLog LCritical, &"Call failed: {res}"
         writeStackTrace()
         quit QuitFailure
 
 proc vkCheck*(res: bool, msg = "") =
     if not res:
         if msg != "": vkLog LCritical, msg
-        vkLog LCritical, "Call failed: " & $res
+        vkLog LCritical, &"Call failed: {res}"
         writeStackTrace()
         quit QuitFailure
 

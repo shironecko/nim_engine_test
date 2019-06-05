@@ -1,6 +1,7 @@
 import strutils
 import sequtils
 import sugar
+import strformat
 import sdl2/[sdl, sdl_syswm]
 import log
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
@@ -33,10 +34,9 @@ proc getWindowDimentions(window : sdl.Window) : WindowDimentions =
 
 var windowDimentions = getWindowDimentions(window)
 
-proc `$`(vkVersion: VulkanVersionInfo): string = "$#.$#.$#".format(vkVersion.major, vkVersion.minor, vkVersion.patch)
 let vkVersionInfo = makeVulkanVersionInfo vkApiVersion10
-vkLog LInfo, "Vulkan API Version: " & $vkVersionInfo
-vkLog LInfo, "Vulkan Header Version: $#" % [$vkHeaderVersion]
+vkLog LInfo, &"Vulkan API Version: {vkVersionInfo}"
+vkLog LInfo, &"Vulkan Header Version: {vkHeaderVersion}"
 
 let 
     vkAvailableLayers = vkEnumerateInstanceLayerProperties()
@@ -46,13 +46,13 @@ let
 vkLog LTrace, "[Layers]"
 for layer in vkAvailableLayers:
     let layerName = charArrayToString layer.layerName
-    vkLog LTrace, "\t$# ($#, $#)".format(layerName, makeVulkanVersionInfo layer.specVersion, layer.implementationVersion)
-    vkLog LTrace, "\t" & charArrayToString layer.description
+    vkLog LTrace, &"\t{layerName} ({makeVulkanVersionInfo layer.specVersion}, {layer.implementationVersion})"
+    vkLog LTrace, &"\t{charArrayToString layer.description}"
     vkLog LTrace, ""
 
 let vkNotFoundLayerNames = vkDesiredLayerNames.filterIt(not vkLayerNamesToRequest.contains(it))
-if vkNotFoundLayerNames.len() != 0: vkLog LWarning, "Requested layers not found: " & $vkNotFoundLayerNames
-vkLog LInfo, "Requesting layers: " & $vkLayerNamesToRequest
+if vkNotFoundLayerNames.len() != 0: vkLog LWarning, &"Requested layers not found: {vkNotFoundLayerNames}"
+vkLog LInfo, &"Requesting layers: {vkLayerNamesToRequest}"
 
 var 
     sdlVkExtensionCount: cuint
@@ -61,7 +61,7 @@ sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, nil)
 sdlVkExtensionsCStrings.setLen(sdlVkExtensionCount)
 sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, cast[cstringArray](addr sdlVkExtensionsCStrings[0]))
 let sdlVkDesiredExtensions = sdlVkExtensionsCStrings.mapIt($it)
-sdlLog LInfo, "SDL VK required extensions: " & $sdlVkDesiredExtensions
+sdlLog LInfo, &"SDL VK required extensions: {sdlVkDesiredExtensions}"
 
 # TODO: move to debug utils
 let 
@@ -72,11 +72,11 @@ let
 vkLog LTrace, "[Extensions]"
 for extension in vkAvailableExtensions:
     let extensionName = charArrayToString(extension.extensionName)
-    vkLog LTrace, "\t$# $#".format(extensionName, makeVulkanVersionInfo(extension.specVersion))
+    vkLog LTrace, &"\t{extensionName} {makeVulkanVersionInfo extension.specVersion}"
 
 let vkNotFoundExtensions = vkDesiredExtensionNames.filterIt(not vkExtensionNamesToRequest.contains(it))
-if vkNotFoundExtensions.len() != 0: vkLog LWarning, "Requested extensions not found: " & $vkNotFoundExtensions
-vkLog LInfo, "Requesting extensions: " & $vkExtensionNamesToRequest
+if vkNotFoundExtensions.len() != 0: vkLog LWarning, &"Requested extensions not found: {vkNotFoundExtensions}"
+vkLog LInfo, &"Requesting extensions: {vkExtensionNamesToRequest}"
 
 var vkInstance: vk.VkInstance
 block CreateVulkanInstance:
@@ -118,7 +118,7 @@ block SetupVulkanDebugCallback:
         elif maskCheck(flags, VkDebugReportFlagBitsEXT.performanceWarning): logLevel = LWarning
         elif maskCheck(flags, VkDebugReportFlagBitsEXT.information):        logLevel = LInfo
         elif maskCheck(flags, VkDebugReportFlagBitsEXT.debug):              logLevel = LTrace
-        vkLog logLevel, "$# $# $# $#".format(pLayerPrefix, objectType, messageCode, pMessage)
+        vkLog logLevel, &"{pLayerPrefix} {objectType} {messageCode} {pMessage}"
         vkFalse
 
     let 
@@ -145,7 +145,7 @@ proc vkVendorIDToGPUVendor(vendorID: uint32): GPUVendor =
         else: GPUVendor.Unknown
 
 let vkDevices = vkEnumeratePhysicalDevices(vkInstance)
-check vkDevices.len() != 0, "VK: failed to find any devices!"
+vkCheck vkDevices.len() != 0, "Failed to find any compatible devices!"
 
 let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[
         id: VkPhysicalDevice
@@ -161,24 +161,24 @@ let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tup
     for i, q in result.queues:
         var surfaceSupported: VkBool32
         vkCheck vkGetPhysicalDeviceSurfaceSupportKHR(device, uint32 i, vkSurface, addr surfaceSupported)
-        if (surfaceSupported == vkTrue) and maskCheck(q.queueFlags, VkQueueFlagBits.graphics):
+        if surfaceSupported == vkTrue and maskCheck(q.queueFlags, VkQueueFlagBits.graphics):
             result.presentQueueIdx = uint32 i
             break
 )
 
 vkLog LTrace, "[Devices]"
-for device in vkDevicesWithProperties:
-    vkLog LTrace, "\t" & charArrayToString(device[1].deviceName)
-    vkLog LTrace, "\t\tType $# API $# Driver $# Vendor $#".format(device.props.deviceType, makeVulkanVersionInfo(device.props.apiVersion), device.props.driverVersion, vkVendorIDToGPUVendor device.props.vendorID)
+for d in vkDevicesWithProperties:
+    vkLog LTrace, &"\t{charArrayToString d[1].deviceName}"
+    vkLog LTrace, &"\t\tType {d.props.deviceType} API {makeVulkanVersionInfo d.props.apiVersion} Driver {d.props.driverVersion} Vendor {vkVendorIDToGPUVendor d.props.vendorID}"
 let vkCompatibleDevices = vkDevicesWithProperties.filter((d) => d.presentQueueIdx != 0xFFFFFFFF'u32)
 vkLog LInfo, "[Compatible Devices]"
-for device in vkCompatibleDevices:
-    vkLog LInfo, "\t" & charArrayToString(device.props.deviceName)
+for d in vkCompatibleDevices:
+    vkLog LInfo, &"\t{charArrayToString d.props.deviceName}"
 if (vkCompatibleDevices.len == 0):
     vkLog LCritical, "No compatible devices found!"
     quit QuitFailure
 let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
-vkLog LInfo, "Selected physical device: " & charArrayToString(vkSelectedPhysicalDevice.props.deviceName)
+vkLog LInfo, &"Selected physical device: {charArrayToString vkSelectedPhysicalDevice.props.deviceName}"
 
 var
     queuePriorities = [1.0'f32]
@@ -188,7 +188,8 @@ var
         , queueCount: 1
         , pQueuePriorities: addr queuePriorities[0]
     )
-    deviceExtensions = allocCStringArray(["VK_KHR_swapchain"])
+    deviceExtensions = ["VK_KHR_swapchain"]
+    deviceExtensionsCStrings = allocCStringArray(deviceExtensions)
     deviceFeatures = VkPhysicalDeviceFeatures(
         shaderClipDistance: vkTrue
     )
@@ -197,17 +198,17 @@ var
         , queueCreateInfoCount: 1
         , pQueueCreateInfos: addr queueCreateInfo
         , enabledExtensionCount: 1
-        , ppEnabledExtensionNames: deviceExtensions
+        , ppEnabledExtensionNames: deviceExtensionsCStrings
         , pEnabledFeatures: addr deviceFeatures
     )
     vkDevice: VkDevice
 vkCheck vkCreateDevice(vkSelectedPhysicalDevice.id, addr deviceInfo, nil, addr vkDevice)
-deallocCStringArray(deviceExtensions)
+deallocCStringArray(deviceExtensionsCStrings)
 
 let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface)
 vkLog LTrace, "[Surface Formats]"
 for fmt in surfaceFormats:
-    vkLog LTrace, "\t" & $fmt.format
+    vkLog LTrace, &"\t{fmt.format}"
 vkCheck surfaceFormats.len > 0, "No surface formats returned!"
 
 var colorFormat: VkFormat
@@ -216,7 +217,7 @@ if surfaceFormats.len() == 1 and surfaceFormats[0].format == VkFormat.undefined:
 else:
     colorFormat = surfaceFormats[0].format
 let colorSpace = surfaceFormats[0].colorSpace
-vkLog LInfo, "Selected surface format: $#, colorspace: $#".format(colorFormat, colorSpace)
+vkLog LInfo, &"Selected surface format: {colorFormat}, colorspace: {colorSpace}"
 
 var surfaceCapabilities: VkSurfaceCapabilitiesKHR
 vkCheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr surfaceCapabilities)
@@ -225,26 +226,26 @@ if desiredImageCount < surfaceCapabilities.minImageCount:
     desiredImageCount = surfaceCapabilities.minImageCount
 elif surfaceCapabilities.maxImageCount != 0 and desiredImageCount > surfaceCapabilities.maxImageCount: 
     desiredImageCount = surfaceCapabilities.maxImageCount
-vkLog LInfo, "Desired swapchain images: " & $desiredImageCount
+vkLog LInfo, &"Desired swapchain images: {desiredImageCount}"
 
 var surfaceResolution = surfaceCapabilities.currentExtent
 if surfaceResolution.width == 0xFFFFFFFF'u32:
     surfaceResolution.width = 640
     surfaceResolution.height = 480
-vkLog LInfo, "Surface resolution: " & $surfaceResolution
+vkLog LInfo, &"Surface resolution: {surfaceResolution}"
 
 var preTransform = surfaceCapabilities.currentTransform
 if maskCheck(surfaceCapabilities.supportedTransforms, VkSurfaceTransformFlagBitsKHR.identity):
     preTransform = VkSurfaceTransformFlagBitsKHR.identity
 
 let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface)
-vkLog LTrace, "Present modes: " & $presentModes
+vkLog LTrace, &"Present modes: {presentModes}"
 var presentMode = VkPresentModeKHR.fifo
 for pm in presentModes:
     if pm == VkPresentModeKHR.mailbox:
         presentMode = VkPresentModeKHR.mailbox
         break
-vkLog LInfo, "Selected present mode: " & $presentMode
+vkLog LInfo, &"Selected present mode: {presentMode}"
 
 let swapChainCreateInfo = VkSwapchainCreateInfoKHR(
         sType: VkStructureType.swapchainCreateInfoKHR
@@ -265,7 +266,7 @@ var swapChain: VkSwapchainKHR
 vkCheck vkCreateSwapchainKHR(vkSelectedPhysicalDevice.id, unsafeAddr swapChainCreateInfo, nil, addr swapChain)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
-    gLog LInfo, "Render resolution changed to: ($1, $2)".format(winDim.width, winDim.height)
+    gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
 
 updateRenderResolution(windowDimentions)
 
