@@ -13,6 +13,7 @@ proc maskCombine*(bits: varargs[uint64, `uint64`]): uint64 =
     var mask = 0'u64
     for bit in bits:
         mask = (mask or bit)
+    mask
 
 proc charArrayToString*[LEN](charArr: array[LEN, char]): string =
     for c in charArr:
