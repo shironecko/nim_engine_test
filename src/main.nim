@@ -41,7 +41,7 @@ vkLog LInfo, &"Vulkan Header Version: {vkHeaderVersion}"
 let 
     vkAvailableLayers = vkEnumerateInstanceLayerProperties()
     vkAvailableLayerNames = vkAvailableLayers.mapIt charArrayToString(it.layerName)
-    vkDesiredLayerNames = @["VK_LAYER_LUNARG_standard_validation", "VK_LAYER_LUNARG_api_dump"]
+    vkDesiredLayerNames = @["VK_LAYER_LUNARG_standard_validation"]
     vkLayerNamesToRequest = vkAvailableLayerNames.intersect vkDesiredLayerNames
 vkLog LTrace, "[Layers]"
 for layer in vkAvailableLayers:
@@ -111,7 +111,7 @@ type
     VulkanDebugVerbosity {.pure.} = enum
         Light, Full
 const
-    vkDebugVerbosity = VulkanDebugVerbosity.Full
+    vkDebugVerbosity = VulkanDebugVerbosity.Light
     vkDebugMask = case vkDebugVerbosity:
         of Light: maskCombine(VkDebugReportFlagBitsEXT.error, VkDebugReportFlagBitsEXT.warning, VkDebugReportFlagBitsEXT.performanceWarning)
         of Full: maskCombine(VkDebugReportFlagBitsEXT.error, VkDebugReportFlagBitsEXT.warning, VkDebugReportFlagBitsEXT.performanceWarning, VkDebugReportFlagBitsEXT.information, VkDebugReportFlagBitsEXT.debug)
@@ -185,6 +185,11 @@ for d in vkCompatibleDevices:
 let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
 vkLog LInfo, &"Selected physical device: {charArrayToString vkSelectedPhysicalDevice.props.deviceName}"
 
+let vkDeviceExtensions = vkEnumerateDeviceExtensionProperties(vkSelectedPhysicalDevice.id, nil)
+vkLog LTrace, "[Device Extensions]"
+for ex in vkDeviceExtensions:
+    vkLog LTrace, &"\t{charArrayToString(ex.extensionName)}({makeVulkanVersionInfo(ex.specVersion)})"
+
 var
     queuePriorities = [1.0'f32]
     queueCreateInfo = VkDeviceQueueCreateInfo(
@@ -193,7 +198,7 @@ var
         , queueCount: 1
         , pQueuePriorities: addr queuePriorities[0]
     )
-    deviceExtensions = ["VK_KHR_swapchain", "VK_MVK_macos_surface", "VK_MVK_moltenvk"]
+    deviceExtensions = ["VK_KHR_swapchain"]
     deviceExtensionsCStrings = allocCStringArray(deviceExtensions)
     deviceFeatures = VkPhysicalDeviceFeatures(
         shaderClipDistance: vkTrue
@@ -202,10 +207,10 @@ var
         sType: VkStructureType.deviceCreateInfo
         , queueCreateInfoCount: 1
         , pQueueCreateInfos: addr queueCreateInfo
-        , enabledExtensionCount: uint32 deviceExtensions.len()
-        , ppEnabledExtensionNames: deviceExtensionsCStrings
         , enabledLayerCount: uint32 vkLayerNamesToRequest.len()
         , ppEnabledLayerNames: vkLayersCStrings
+        , enabledExtensionCount: uint32 deviceExtensions.len()
+        , ppEnabledExtensionNames: deviceExtensionsCStrings
         , pEnabledFeatures: addr deviceFeatures
     )
     vkDevice: VkDevice
@@ -273,7 +278,7 @@ let swapChainCreateInfo = VkSwapchainCreateInfoKHR(
 var swapChain: VkSwapchainKHR
 doAssert(vkCreateSwapchainKHR != nil)
 echo vkCreateSwapchainKHR == nil
-vkCheck vkCreateSwapchainKHR(vkSelectedPhysicalDevice.id, unsafeAddr swapChainCreateInfo, nil, addr swapChain)
+vkCheck vkCreateSwapchainKHR(vkDevice, unsafeAddr swapChainCreateInfo, nil, addr swapChain)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"

@@ -77,6 +77,7 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR
     vkGetPhysicalDeviceSurfaceFormatsKHR: vkGetPhysicalDeviceSurfaceFormatsKHRRaw
     vkGetPhysicalDeviceSurfacePresentModesKHR: vkGetPhysicalDeviceSurfacePresentModesKHRRaw
+    vkEnumerateDeviceExtensionProperties: vkEnumerateDeviceExtensionPropertiesRaw
     vkCreateSwapchainKHR
     vkDestroySwapchainKHR
     vkCreateDebugReportCallbackEXT
@@ -142,3 +143,6 @@ generateVulkanArrayGetterWrapper vkGetPhysicalDeviceSurfaceFormatsKHRRaw, vkGetP
 generateVulkanArrayGetterWrapper vkGetPhysicalDeviceSurfacePresentModesKHRRaw, vkGetPhysicalDeviceSurfacePresentModesKHR, VkPresentModeKHR:
     device: VkPhysicalDevice
     surface: VkSurfaceKHR
+generateVulkanArrayGetterWrapper vkEnumerateDeviceExtensionPropertiesRaw, vkEnumerateDeviceExtensionProperties, VkExtensionProperties:
+    device: VkPhysicalDevice
+    pLayerName: cstring
