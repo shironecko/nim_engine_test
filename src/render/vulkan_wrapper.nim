@@ -80,8 +80,27 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkEnumerateDeviceExtensionProperties: vkEnumerateDeviceExtensionPropertiesRaw
     vkCreateSwapchainKHR
     vkDestroySwapchainKHR
+    vkGetSwapchainImagesKHR: vkGetSwapchainImagesKHRRaw
+    vkCreateImageView
+    vkDestroyImageView
+    vkAcquireNextImageKHR
     vkCreateDebugReportCallbackEXT
     vkDestroyDebugReportCallbackEXT
+    vkGetDeviceQueue
+    vkCreateCommandPool
+    vkDestroyCommandPool
+    vkAllocateCommandBuffers
+    vkFreeCommandBuffers
+    vkBeginCommandBuffer
+    vkCmdPipelineBarrier
+    vkEndCommandBuffer
+    vkResetCommandBuffer
+    vkQueueSubmit
+    vkQueuePresentKHR
+    vkCreateFence
+    vkDestroyFence
+    vkWaitForFences
+    vkResetFences
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym
@@ -146,3 +165,6 @@ generateVulkanArrayGetterWrapper vkGetPhysicalDeviceSurfacePresentModesKHRRaw, v
 generateVulkanArrayGetterWrapper vkEnumerateDeviceExtensionPropertiesRaw, vkEnumerateDeviceExtensionProperties, VkExtensionProperties:
     device: VkPhysicalDevice
     pLayerName: cstring
+generateVulkanArrayGetterWrapper vkGetSwapchainImagesKHRRaw, vkGetSwapchainImagesKHR, VkImage:
+    device: VkDevice
+    swapChain: VkSwapchainKHR

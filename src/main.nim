@@ -275,10 +275,126 @@ let swapChainCreateInfo = VkSwapchainCreateInfoKHR(
         , clipped: vkTrue
         , oldSwapchain: nil
     )
-var swapChain: VkSwapchainKHR
+var vkSwapchain: VkSwapchainKHR
 doAssert(vkCreateSwapchainKHR != nil)
 echo vkCreateSwapchainKHR == nil
-vkCheck vkCreateSwapchainKHR(vkDevice, unsafeAddr swapChainCreateInfo, nil, addr swapChain)
+vkCheck vkCreateSwapchainKHR(vkDevice, unsafeAddr swapChainCreateInfo, nil, addr vkSwapchain)
+
+var vkQueue: VkQueue
+vkCheck vkGetDeviceQueue(vkDevice, vkSelectedPhysicalDevice.presentQueueIdx, 0, addr vkQueue)
+
+let vkCommandPoolCreateInfo = VkCommandPoolCreateInfo(
+    sType: VkStructureType.commandPoolCreateInfo
+    , flags: uint32 VkCommandPoolCreateFlagBits.resetCommandBuffer
+    , queueFamilyIndex: vkSelectedPhysicalDevice.presentQueueIdx
+)
+var vkCommandPool: VkCommandPool
+vkCheck vkCreateCommandPool(vkDevice, unsafeAddr vkCommandPoolCreateInfo, nil, addr vkCommandPool)
+
+let vkCommandBufferAllocateInfo = VkCommandBufferAllocateInfo(
+    sType: VkStructureType.commandBufferAllocateInfo
+    , commandPool: vkCommandPool
+    , level: VkCommandBufferLevel.primary
+    , commandBufferCount: 1
+)
+var vkSetupCmdBuffer, vkRenderCmdBuffer: VkCommandBuffer
+vkCheck vkAllocateCommandBuffers(vkDevice, unsafeAddr vkCommandBufferAllocateInfo, addr vkSetupCmdBuffer)
+vkCheck vkAllocateCommandBuffers(vkDevice, unsafeAddr vkCommandBufferAllocateInfo, addr vkRenderCmdBuffer)
+
+let vkSwapchainImages = vkGetSwapchainImagesKHR(vkDevice, vkSwapchain)
+var vkPresentImagesViewCreateInfo = VkImageViewCreateInfo(
+    sType: VkStructureType.imageViewCreateInfo
+    , viewType: VkImageViewType.twoDee
+    , format: colorFormat
+    , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
+    , subresourceRange: VkImageSubresourceRange(
+        aspectMask: uint32 VkImageAspectFlagBits.color
+        , baseMipLevel: 0
+        , levelCount: 1
+        , baseArrayLayer: 0
+        , layerCount: 1
+    )
+)
+
+let
+    vkCommandBufferBeginInfo = VkCommandBufferBeginInfo(
+        sType: VkStructureType.commandBufferBeginInfo
+        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
+    )
+    vkFenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
+var vkSubmitFence: VkFence
+vkCheck vkCreateFence(vkDevice, unsafeAddr vkFenceCreateInfo, nil, addr vkSubmitFence)
+
+var vkImageViews: seq[VkImageView]
+for img in vkSwapchainImages:
+    vkPresentImagesViewCreateInfo.image = img
+    vkCheck vkBeginCommandBuffer(vkSetupCmdBuffer, unsafeAddr vkCommandBufferBeginInfo)
+
+    let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
+        sType: VkStructureType.imageMemoryBarrier
+        , srcAccessMask: 0
+        , dstAccessMask: uint32 VkAccessFlagBits.memoryRead
+        , oldLayout: VkImageLayout.undefined
+        , newLayout: VkImageLayout.presentSrcKHR
+        , srcQueueFamilyIndex: 0xFFFFFFFF'u32
+        , dstQueueFamilyIndex: 0xFFFFFFFF'u32
+        , image: img
+        , subresourceRange: VkImageSubresourceRange(
+            aspectMask: uint32 VkImageAspectFlagBits.color
+            , baseMipLevel: 0
+            , levelCount: 1
+            , baseArrayLayer: 0
+            , layerCount: 1
+        )
+    )
+    vkCheck vkCmdPipelineBarrier(
+        vkSetupCmdBuffer
+        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , 0
+        , 0, nil
+        , 0, nil
+        , 1, unsafeAddr vkLayoutTransitionBarrier
+    )
+
+    vkCheck vkEndCommandBuffer(vkSetupCmdBuffer)
+
+    let
+        vkWaitStageMask: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.colorAttachmentOutput
+        vkSubmitInfo = VkSubmitInfo(
+            sType: VkStructureType.submitInfo
+            , waitSemaphoreCount: 0
+            , pWaitSemaphores: nil
+            , pWaitDstStageMask: unsafeAddr vkWaitStageMask
+            , commandBufferCount: 1
+            , pCommandBuffers: addr vkSetupCmdBuffer
+            , signalSemaphoreCount: 0
+            , pSignalSemaphores: nil
+        )
+    vkCheck vkQueueSubmit(vkQueue, 1, unsafeAddr vkSubmitInfo, vkSubmitFence)
+    vkCheck vkWaitForFences(vkDevice, 1, addr vkSubmitFence, vkTrue, 0xFFFFFFFF_FFFFFFFF'u64)
+    vkCheck vkResetFences(vkDevice, 1, addr vkSubmitFence)
+
+    vkCheck vkResetCommandBuffer(vkSetupCmdBuffer, 0)
+
+    var vkImageView: VkImageView
+    vkCheck vkCreateImageView(vkDevice, unsafeAddr vkPresentImagesViewCreateInfo, nil, addr vkImageView)
+    vkImageViews.add vkImageView
+
+let render = proc() =
+    var nextImageIdx: uint32
+    vkCheck vkAcquireNextImageKHR(vkDevice, vkSwapchain, 0xFFFFFFFF_FFFFFFFF'u64, vkNullHandle, vkNullHandle, addr nextImageIdx)
+    let presentInfo = VkPresentInfoKHR(
+        sType: VkStructureType.presentInfoKHR
+        , pNext: nil
+        , waitSemaphoreCount: 0
+        , pWaitSemaphores: nil
+        , swapchainCount: 1
+        , pSwapchains: addr vkSwapchain
+        , pImageIndices: addr nextImageIdx
+        , pResults: nil
+    )
+    vkCheck vkQueuePresentKHR(vkQueue, unsafeAddr presentInfo)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
@@ -297,8 +413,16 @@ block GameLoop:
                 if windowDimentions != newWindowDimensions:
                     updateRenderResolution(newWindowDimensions)
                     windowDimentions = newWindowDimensions
+    
+        render()
 
-vkDestroySwapchainKHR(vkDevice, swapChain, nil)
+for imgView in vkImageViews:
+    vkDestroyImageView(vkDevice, imgView, nil)
+vkDestroyFence(vkDevice, vkSubmitFence, nil)
+vkFreeCommandBuffers(vkDevice, vkCommandPool, 1, addr vkRenderCmdBuffer)
+vkFreeCommandBuffers(vkDevice, vkCommandPool, 1, addr vkSetupCmdBuffer)
+vkDestroyCommandPool(vkDevice, vkCommandPool, nil)
+vkDestroySwapchainKHR(vkDevice, vkSwapchain, nil)
 vkDestroyDevice(vkDevice, nil)
 vkDestroyDebugReportCallbackEXT(vkInstance, vkDebugCallback, nil)
 vkDestroyInstance(vkInstance, nil)
