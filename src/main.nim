@@ -157,11 +157,13 @@ vkCheck vkDevices.len() != 0, "Failed to find any compatible devices!"
 let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[
         id: VkPhysicalDevice
         , props: VkPhysicalDeviceProperties
+        , memoryProps: VkPhysicalDeviceMemoryProperties
         , queues: seq[VkQueueFamilyProperties]
         , presentQueueIdx: uint32
     ] =
     result.id = device
     vkGetPhysicalDeviceProperties(device, addr result.props)
+    vkGetPhysicalDeviceMemoryProperties(device, addr result.memoryProps)
 
     result.queues = vkGetPhysicalDeviceQueueFamilyProperties(device)
     result.presentQueueIdx = 0xFFFFFFFF'u32
@@ -280,6 +282,45 @@ doAssert(vkCreateSwapchainKHR != nil)
 echo vkCreateSwapchainKHR == nil
 vkCheck vkCreateSwapchainKHR(vkDevice, unsafeAddr swapChainCreateInfo, nil, addr vkSwapchain)
 
+let vkImageCreateInfo = VkImageCreateInfo(
+    sType: VkStructureType.imageCreateInfo
+    , imageType: VkImageType.twoDee
+    , format: VkFormat.d16Unorm
+    , extent: VkExtent3D(width: surfaceResolution.width, height: surfaceResolution.height, depth: 1)
+    , mipLevels: 1
+    , arrayLayers: 1
+    , samples: VkSampleCountFlagBits.one
+    , tiling: VkImageTiling.optimal
+    , usage: uint32 VkImageUsageFlagBits.depthStencilAttachment
+    , sharingMode: VkSharingMode.exclusive
+    , queueFamilyIndexCount: 0
+    , pQueueFamilyIndices: nil
+    , initialLayout: VkImageLayout.undefined
+)
+var vkDepthImage: VkImage
+vkCheck vkCreateImage(vkDevice, unsafeAddr vkImageCreateInfo, nil, addr vkDepthImage)
+
+var vkMemoryRequirements: VkMemoryRequirements
+vkCheck vkGetImageMemoryRequirements(vkDevice, vkDepthImage, addr vkMemoryRequirements)
+var vkImageAllocateInfo = VkMemoryAllocateInfo(
+    sType: VkStructureType.memoryAllocateInfo
+    , allocationSize: vkMemoryRequirements.size
+)
+var
+    vkMemoryTypeBits = vkMemoryRequirements.memoryTypeBits
+    vkDesiredMemoryFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal
+for i in 0..<32:
+    let memoryType = vkSelectedPhysicalDevice.memoryProps.memoryTypes[i]
+    if maskCheck(vkMemoryTypeBits, 1):
+        if maskCheck(memoryType.propertyFlags, vkDesiredMemoryFlags):
+            vkImageAllocateInfo.memoryTypeIndex = uint32 i
+            break
+    vkMemoryTypeBits = vkMemoryTypeBits shr 1
+
+var vkImageMemory: VkDeviceMemory
+vkCheck vkAllocateMemory(vkDevice,addr vkImageAllocateInfo, nil, addr vkImageMemory)
+vkCheck vkBindImageMemory(vkDevice, vkDepthImage, vkImageMemory, 0)
+
 var vkQueue: VkQueue
 vkCheck vkGetDeviceQueue(vkDevice, vkSelectedPhysicalDevice.presentQueueIdx, 0, addr vkQueue)
 
@@ -381,6 +422,143 @@ for img in vkSwapchainImages:
     vkCheck vkCreateImageView(vkDevice, unsafeAddr vkPresentImagesViewCreateInfo, nil, addr vkImageView)
     vkImageViews.add vkImageView
 
+var vkDepthImageView: VkImageView
+block DepthStensilSetup:
+    let beginInfo = VkCommandBufferBeginInfo(
+        sType: VkStructureType.commandBufferBeginInfo
+        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
+    )
+    vkCheck vkBeginCommandBuffer(vkSetupCmdBuffer, unsafeAddr beginInfo)
+    let layoutTransitionBarrier = VkImageMemoryBarrier(
+        sType: VkStructureType.imageMemoryBarrier
+        , srcAccessMask: 0
+        , dstAccessMask: uint32 maskCombine(VkAccessFlagBits.depthStencilAttachmentRead, VkAccessFlagBits.depthStencilAttachmentWrite)
+        , oldLayout: VkImageLayout.undefined
+        , newLayout: VkImageLayout.depthStencilAttachmentOptimal
+        , srcQueueFamilyIndex: 0xFFFFFFFF'u32
+        , dstQueueFamilyIndex: 0xFFFFFFFF'u32
+        , image: vkDepthImage
+        , subresourceRange: VkImageSubresourceRange(
+            aspectMask: uint32 VkImageAspectFlagBits.depth
+            , baseMipLevel: 0
+            , levelCount: 1
+            , baseArrayLayer: 0
+            , layerCount: 1
+        )
+    )
+    vkCheck vkCmdPipelineBarrier(
+        vkSetupCmdBuffer
+        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , 0
+        , 0, nil
+        , 0, nil
+        , 1, unsafeAddr layoutTransitionBarrier
+    )
+    vkCheck vkEndCommandBuffer(vkSetupCmdBuffer)
+
+    let
+        waitStageMask: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.colorAttachmentOutput
+        submitInfo = VkSubmitInfo(
+            sType: VkStructureType.submitInfo
+            , waitSemaphoreCount: 0
+            , pWaitSemaphores: nil
+            , pWaitDstStageMask: unsafeAddr waitStageMask
+            , commandBufferCount: 1
+            , pCommandBuffers: addr vkSetupCmdBuffer
+            , signalSemaphoreCount: 0
+            , pSignalSemaphores: nil
+        )
+    vkCheck vkQueueSubmit(vkQueue, 1, unsafeAddr submitInfo, vkSubmitFence)
+
+    vkCheck vkWaitForFences(vkDevice, 1, addr vkSubmitFence, vkTrue, 0xFFFFFFFF_FFFFFFFF'u64)
+    vkCheck vkResetFences(vkDevice, 1, addr vkSubmitFence)
+    vkCheck vkResetCommandBuffer(vkSetupCmdBuffer, 0)
+
+    let
+        imageViewCreateInfo = VkImageViewCreateInfo(
+            sType: VkStructureType.imageViewCreateInfo
+            , image: vkDepthImage
+            , viewType: VkImageViewType.twoDee
+            , format: vkImageCreateInfo.format
+            , components: VkComponentMapping(r: VkComponentSwizzle.identity, g: VkComponentSwizzle.identity, b: VkComponentSwizzle.identity, a: VkComponentSwizzle.identity)
+            , subresourceRange: VkImageSubresourceRange(
+                aspectMask: uint32 VkImageAspectFlagBits.depth
+                , baseMipLevel: 0
+                , levelCount: 1
+                , baseArrayLayer: 0
+                , layerCount: 1
+            )
+        )
+    vkCheck vkCreateImageView(vkDevice, unsafeAddr imageViewCreateInfo, nil, addr vkDepthImageView)
+
+let
+    passAttachments = @[
+        VkAttachmentDescription(
+            format: colorFormat
+            , samples: VkSampleCountFlagBits.one
+            , loadOp: VkAttachmentLoadOp.opClear
+            , storeOp: VkAttachmentStoreOp.opStore
+            , stencilLoadOp: VkAttachmentLoadOp.opDontCare
+            , stencilStoreOp: VkAttachmentStoreOp.opDontCare
+            , initialLayout: VkImageLayout.colorAttachmentOptimal
+            , finalLayout: VkImageLayout.colorAttachmentOptimal
+        )
+        , VkAttachmentDescription(
+            format: VkFormat.d16Unorm
+            , samples: VkSampleCountFlagBits.one
+            , loadOp: VkAttachmentLoadOp.opClear
+            , storeOp: VkAttachmentStoreOp.opDontCare
+            , stencilLoadOp: VkAttachmentLoadOp.opDontCare
+            , stencilStoreOp: VkAttachmentStoreOp.opDontCare
+            , initialLayout: VkImageLayout.depthStencilAttachmentOptimal
+            , finalLayout: VkImageLayout.depthStencilAttachmentOptimal
+        )
+    ]
+    colorAttachmentReference = VkAttachmentReference(
+        attachment: 0
+        , layout: VkImageLayout.colorAttachmentOptimal
+    )
+    depthAttachmentReference = VkAttachmentReference(
+        attachment: 1
+        , layout: VkImageLayout.depthStencilAttachmentOptimal
+    )
+    subpass = VkSubpassDescription(
+        pipelineBindPoint: VkPipelineBindPoint.graphics
+        , colorAttachmentCount: 1
+        , pColorAttachments: unsafeAddr colorAttachmentReference
+        , pDepthStencilAttachment: unsafeAddr depthAttachmentReference
+    )
+    renderPassCreateInfo = VkRenderPassCreateInfo(
+        sType: VkStructureType.renderPassCreateInfo
+        , attachmentCount: 2
+        , pAttachments: unsafeAddr passAttachments[0]
+        , subpassCount: 1
+        , pSubpasses: unsafeAddr subpass
+    )
+var vkRenderPass: VkRenderPass
+vkCheck vkCreateRenderPass(vkDevice, unsafeAddr renderPassCreateInfo, nil, addr vkRenderPass)
+
+var frameBufferAttachments: seq[VkImageView]
+frameBufferAttachments.setLen(2)
+frameBufferAttachments[1] = vkDepthImageView
+
+let framebufferCreateInfo = VkFramebufferCreateInfo(
+    sType: VkStructureType.framebufferCreateInfo
+    , renderPass: vkRenderPass
+    , attachmentCount: 2
+    , pAttachments: addr frameBufferAttachments[0]
+    , width: surfaceResolution.width
+    , height: surfaceResolution.height
+    , layers: 1
+)
+
+var vkFramebuffers: seq[VkFramebuffer]
+vkFramebuffers.setLen(vkImageViews.len())
+for i, piv in vkImageViews:
+    frameBufferAttachments[0] = piv
+    vkCheck vkCreateFramebuffer(vkDevice, unsafeAddr framebufferCreateInfo, nil, addr vkFramebuffers[i])
+
 let render = proc() =
     var nextImageIdx: uint32
     vkCheck vkAcquireNextImageKHR(vkDevice, vkSwapchain, 0xFFFFFFFF_FFFFFFFF'u64, vkNullHandle, vkNullHandle, addr nextImageIdx)
@@ -416,8 +594,14 @@ block GameLoop:
     
         render()
 
+for fb in vkFramebuffers:
+    vkDestroyFramebuffer(vkDevice, fb, nil)
+vkDestroyRenderPass(vkDevice, vkRenderPass, nil)
 for imgView in vkImageViews:
     vkDestroyImageView(vkDevice, imgView, nil)
+vkDestroyImageView(vkDevice, vkDepthImageView, nil)
+vkDestroyImage(vkDevice, vkDepthImage, nil)
+vkFreeMemory(vkDevice, vkImageMemory, nil)
 vkDestroyFence(vkDevice, vkSubmitFence, nil)
 vkFreeCommandBuffers(vkDevice, vkCommandPool, 1, addr vkRenderCmdBuffer)
 vkFreeCommandBuffers(vkDevice, vkCommandPool, 1, addr vkSetupCmdBuffer)

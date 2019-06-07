@@ -77,10 +77,17 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR
     vkGetPhysicalDeviceSurfaceFormatsKHR: vkGetPhysicalDeviceSurfaceFormatsKHRRaw
     vkGetPhysicalDeviceSurfacePresentModesKHR: vkGetPhysicalDeviceSurfacePresentModesKHRRaw
+    vkGetPhysicalDeviceMemoryProperties
     vkEnumerateDeviceExtensionProperties: vkEnumerateDeviceExtensionPropertiesRaw
     vkCreateSwapchainKHR
     vkDestroySwapchainKHR
     vkGetSwapchainImagesKHR: vkGetSwapchainImagesKHRRaw
+    vkCreateImage
+    vkDestroyImage
+    vkAllocateMemory
+    vkFreeMemory
+    vkBindImageMemory
+    vkGetImageMemoryRequirements
     vkCreateImageView
     vkDestroyImageView
     vkAcquireNextImageKHR
@@ -101,6 +108,10 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyFence
     vkWaitForFences
     vkResetFences
+    vkCreateRenderPass
+    vkDestroyRenderPass
+    vkCreateFramebuffer
+    vkDestroyFramebuffer
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym
