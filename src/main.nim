@@ -632,6 +632,33 @@ var
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkVertexShaderCreateInfo, nil, addr vkVertexShaderModule)
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkFragmentShaderCreateInfo, nil, addr vkFragmentShaderModule)
 
+let vkPipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
+    sType: VkStructureType.pipelineLayoutCreateInfo
+    , setLayoutCount: 0
+    , pSetLayouts: nil
+    , pushConstantRangeCount: 0
+    , pPushConstantRanges: nil
+)
+var vkPipelineLayout: VkPipelineLayout
+vkCheck vkCreatePipelineLayout(vkDevice, unsafeAddr vkPipelineLayoutCreateInfo, nil, addr vkPipelineLayout)
+
+let vkPipelineShaderStageCreateInfos = @[
+    VkPipelineShaderStageCreateInfo(
+        sType: VkStructureType.pipelineShaderStageCreateInfo
+        , stage: VkShaderStageFlagBits.vertex
+        , module: vkVertexShaderModule
+        , pName: "main"
+        , pSpecializationInfo: nil
+    )
+    , VkPipelineShaderStageCreateInfo(
+        sType: VkStructureType.pipelineShaderStageCreateInfo
+        , stage: VkShaderStageFlagBits.fragment
+        , module: vkFragmentShaderModule
+        , pName: "main"
+        , pSpecializationInfo: nil
+    )
+]
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
 
@@ -652,6 +679,7 @@ block GameLoop:
     
         render()
 
+vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
 vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
 vkDestroyShaderModule(vkDevice, vkVertexShaderModule, nil)
 vkFreeMemory(vkDevice, vkVertexBufferMemory, nil)
