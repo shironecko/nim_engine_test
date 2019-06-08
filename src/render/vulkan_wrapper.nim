@@ -86,6 +86,9 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyImage
     vkAllocateMemory
     vkFreeMemory
+    vkMapMemory
+    vkUnmapMemory
+    vkBindBufferMemory
     vkBindImageMemory
     vkGetImageMemoryRequirements
     vkCreateImageView
@@ -112,6 +115,13 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyRenderPass
     vkCreateFramebuffer
     vkDestroyFramebuffer
+    vkCreateBuffer
+    vkDestroyBuffer
+    vkGetBufferMemoryRequirements
+    vkCreateBufferView
+    vkDestroyBufferView
+    vkCreateShaderModule
+    vkDestroyShaderModule
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym

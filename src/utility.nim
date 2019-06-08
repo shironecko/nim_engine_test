@@ -1,4 +1,20 @@
 import sequtils
+import strformat
+import log
+
+type
+    CArrayData{.unchecked.}[T] = array[0..0, T]
+    CArray*[T] = ptr CArrayData[T]
+
+proc readBinaryFile*(path: string): seq[uint8] =
+    var
+        file: File
+        fileSize: int64
+    check open(file, path), &"Can't open file: {path}"
+    fileSize = getFileSize(file)
+    result.setLen(fileSize)
+    discard readBuffer(file, addr result[0], fileSize)
+    close(file)
 
 template intersect*[T](a, b: seq[T]): seq[T] =
     a.filterIt(b.contains(it))

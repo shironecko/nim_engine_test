@@ -574,6 +574,64 @@ let render = proc() =
     )
     vkCheck vkQueuePresentKHR(vkQueue, unsafeAddr presentInfo)
 
+type
+    Vertex = object
+        x, y, z, w: float32
+let vkVertexBufferCreateInfo = VkBufferCreateInfo(
+    sType: VkStructureType.bufferCreateInfo
+    , size: uint64 sizeof(Vertex) * 3
+    , usage: uint32 VkBufferUsageFlagBits.vertexBuffer
+    , sharingMode: VkSharingMode.exclusive
+)
+var vkVertexInputBuffer: VkBuffer
+vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkVertexBufferCreateInfo, nil, addr vkVertexInputBuffer)
+
+var vkVertexBufferMemoryRequirements: VkMemoryRequirements
+vkGetBufferMemoryRequirements(vkDevice, vkVertexInputBuffer, addr vkVertexBufferMemoryRequirements)
+
+var vkBufferAllocateInfo = VkMemoryAllocateInfo(
+    sType: VkStructureType.memoryAllocateInfo
+    , allocationSize: vkVertexBufferMemoryRequirements.size
+)
+
+var vkVertexMemoryTypeBits = vkVertexBufferMemoryRequirements.memoryTypeBits
+let vkVertexDeisredMemoryFlags: VkMemoryPropertyFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible
+for i in 0..<32:
+    let memoryType = vkSelectedPhysicalDevice.memoryProps.memoryTypes[i]
+    if maskCheck(vkVertexMemoryTypeBits, 1):
+        if maskCheck(memoryType.propertyFlags, vkVertexDeisredMemoryFlags):
+            vkBufferAllocateInfo.memoryTypeIndex = uint32 i
+            break
+    vkVertexMemoryTypeBits = vkVertexMemoryTypeBits shr 1
+var vkVertexBufferMemory: VkDeviceMemory
+vkCheck vkAllocateMemory(vkDevice, addr vkBufferAllocateInfo, nil, addr vkVertexBufferMemory)
+
+var vkVertexMappedMem: CArray[Vertex]
+vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
+vkVertexMappedMem[0] = Vertex(x: -1.0, y: -1.0, z: 0, w: 1.0)
+vkVertexMappedMem[1] = Vertex(x:  1.0, y: -1.0, z: 0, w: 1.0)
+vkVertexMappedMem[2] = Vertex(x:  0.0, y:  1.0, z: 0, w: 1.0)
+vkCheck vkUnmapMemory(vkDevice, vkVertexBufferMemory)
+vkCheck vkBindBufferMemory(vkDevice, vkVertexInputBuffer, vkVertexBufferMemory, 0)
+
+let
+    vkVertexShaderBytecode = readBinaryFile("./vert.spv")
+    vkFragmentShaderBytecode = readBinaryFile("./frag.spv")
+    vkVertexShaderCreateInfo = VkShaderModuleCreateInfo(
+        sType: VkStructureType.shaderModuleCreateInfo
+        , codeSize: vkVertexShaderBytecode.len()
+        , pCode: cast[ptr uint32](unsafeAddr vkVertexShaderBytecode[0])
+    )
+    vkFragmentShaderCreateInfo = VkShaderModuleCreateInfo(
+        sType: VkStructureType.shaderModuleCreateInfo
+        , codeSize: vkFragmentShaderBytecode.len()
+        , pCode: cast[ptr uint32](unsafeAddr vkFragmentShaderBytecode[0])
+    )
+var 
+    vkVertexShaderModule, vkFragmentShaderModule: VkShaderModule
+vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkVertexShaderCreateInfo, nil, addr vkVertexShaderModule)
+vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkFragmentShaderCreateInfo, nil, addr vkFragmentShaderModule)
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
 
@@ -594,6 +652,9 @@ block GameLoop:
     
         render()
 
+vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
+vkDestroyShaderModule(vkDevice, vkVertexShaderModule, nil)
+vkFreeMemory(vkDevice, vkVertexBufferMemory, nil)
 for fb in vkFramebuffers:
     vkDestroyFramebuffer(vkDevice, fb, nil)
 vkDestroyRenderPass(vkDevice, vkRenderPass, nil)
