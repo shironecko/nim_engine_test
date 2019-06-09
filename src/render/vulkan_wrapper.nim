@@ -102,9 +102,16 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkAllocateCommandBuffers
     vkFreeCommandBuffers
     vkBeginCommandBuffer
-    vkCmdPipelineBarrier
     vkEndCommandBuffer
     vkResetCommandBuffer
+    vkCmdPipelineBarrier
+    vkCmdBindPipeline
+    vkCmdBeginRenderPass
+    vkCmdEndRenderPass
+    vkCmdSetViewport
+    vkCmdSetScissor
+    vkCmdBindVertexBuffers
+    vkCmdDraw
     vkQueueSubmit
     vkQueuePresentKHR
     vkCreateFence
@@ -126,6 +133,8 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyPipelineLayout
     vkCreateGraphicsPipelines
     vkDestroyPipeline
+    vkCreateSemaphore
+    vkDestroySemaphore
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym
