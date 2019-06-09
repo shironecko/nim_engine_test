@@ -659,6 +659,135 @@ let vkPipelineShaderStageCreateInfos = @[
     )
 ]
 
+let
+    vkVertexInputBindingDescription = VkVertexInputBindingDescription(
+        binding: 0
+        , stride: uint32 sizeof Vertex
+        , inputRate: VkVertexInputRate.vertex
+    )
+    vkVertexInputAttributeDescription = VkVertexInputAttributeDescription(
+        location: 0
+        , binding: 0
+        , format: VkFormat.r32g32b32a32SFloat
+        , offset: 0
+    )
+    vkPipelineVertexInputStateCreateInfo = VkPipelineVertexInputStateCreateInfo(
+        sType: VkStructureType.pipelineVertexInputStateCreateInfo
+        , vertexBindingDescriptionCount: 1
+        , pVertexBindingDescriptions: unsafeAddr vkVertexInputBindingDescription
+        , vertexAttributeDescriptionCount: 1
+        , pVertexAttributeDescriptions: unsafeAddr vkVertexInputAttributeDescription
+    )
+    vkPipelineInputAssemblyStateCreateInfo = VkPipelineInputAssemblyStateCreateInfo(
+        sType: VkStructureType.pipelineInputAssemblyStateCreateInfo
+        , topology: VkPrimitiveTopology.triangleList
+        , primitiveRestartEnable: vkFalse
+    )
+    vkViewport = VkViewport(
+        x: 0, y: 0
+        , width: float32 surfaceResolution.width, height: float32 surfaceResolution.height
+        , minDepth: 0, maxDepth: 1
+    )
+    vkScisors = VkRect2D(
+        offset: VkOffset2D(x: 0, y: 0)
+        , extent: VkExtent2D(width: surfaceResolution.width, height: surfaceResolution.height)
+    )
+    vkViewportStateCreateInfo = VkPipelineViewportStateCreateInfo(
+        sType: VkStructureType.pipelineViewportStateCreateInfo
+        , viewportCount: 1
+        , pViewports: unsafeAddr vkViewport
+        , scissorCount: 1
+        , pScissors: unsafeAddr vkScisors
+    )
+    vkPipelineRasterizationStateCreateInfo = VkPipelineRasterizationStateCreateInfo(
+        sType: VkStructureType.pipelineRasterizationStateCreateInfo
+        , depthClampEnable: vkFalse
+        , rasterizerDiscardEnable: vkFalse
+        , polygonMode: VkPolygonMode.fill
+        , cullMode: VkCullModeFlags VkCullModeFlagBits.none
+        , frontFace: VkFrontFace.counterClockwise
+        , depthBiasEnable: vkFalse
+        , depthBiasConstantFactor: 0
+        , depthBiasClamp: 0
+        , depthBiasSlopeFactor: 0
+        , lineWidth: 1
+    )
+    vkPipelineMultisampleStateCreateInfo = VkPipelineMultisampleStateCreateInfo(
+        sType: VkStructureType.pipelineMultisampleStateCreateInfo
+        , rasterizationSamples: VkSampleCountFlagBits.one
+        , sampleShadingEnable: vkFalse
+        , minSampleShading: 0
+        , pSampleMask: nil
+        , alphaToCoverageEnable: vkFalse
+        , alphaToOneEnable: vkFalse
+    )
+    vkNoopStencilOpState = VkStencilOpState(
+        failOp: VkStencilOp.keep
+        , passOp: VkStencilOp.keep
+        , depthFailOp: VkStencilOp.keep
+        , compareOp: VkCompareOp.always
+        , compareMask: 0
+        , writeMask: 0
+        , reference: 0
+    )
+    vkDepthState = VkPipelineDepthStencilStateCreateInfo(
+        sType: pipelineDepthStencilStateCreateInfo
+        , depthTestEnable: vkTrue
+        , depthWriteEnable: vkTrue
+        , depthCompareOp: VkCompareOp.lessOrEqual
+        , depthBoundsTestEnable: vkFalse
+        , stencilTestEnable: vkFalse
+        , front: vkNoopStencilOpState
+        , back: vkNoopStencilOpState
+        , minDepthBounds: 0
+        , maxDepthBounds: 0
+    )
+    vkColorBlendAttachmentState = VkPipelineColorBlendAttachmentState(
+        blendEnable: vkFalse
+        , srcColorBlendFactor: VkBlendFactor.srcColor
+        , dstColorBlendFactor: VkBlendFactor.oneMinusDstColor
+        , colorBlendOp: VkBlendOp.opAdd
+        , srcAlphaBlendFactor: VkBlendFactor.zero
+        , dstAlphaBlendFactor: VkBlendFactor.zero
+        , alphaBlendOp: VkBlendOp.opAdd
+        , colorWriteMask: 0xf
+    )
+    vkColorBlendState = VkPipelineColorBlendStateCreateInfo(
+        sType: VkStructureType.pipelineColorBlendStateCreateInfo
+        , logicOpEnable: vkFalse
+        , logicOp: VkLogicOp.opClear
+        , attachmentCount: 1
+        , pAttachments: unsafeAddr vkColorBlendAttachmentState
+        , blendConstants: [0'f32, 0, 0, 0]
+    )
+    vkDynamicState = @[VkDynamicState.viewport, VkDynamicState.scissor]
+    vkDynamicStateCreateInfo = VkPipelineDynamicStateCreateInfo(
+        sType: VkStructureType.pipelineDynamicStateCreateInfo
+        , dynamicStateCount: 2
+        , pDynamicStates: unsafeAddr vkDynamicState[0]
+    )
+    vkPipelineCreateInfo = VkGraphicsPipelineCreateInfo(
+        sType: VkStructureType.graphicsPipelineCreateInfo
+        , stageCount: 2
+        , pStages: unsafeAddr vkPipelineShaderStageCreateInfos[0]
+        , pVertexInputState: unsafeAddr vkPipelineVertexInputStateCreateInfo
+        , pInputAssemblyState: unsafeAddr vkPipelineInputAssemblyStateCreateInfo
+        , pTessellationState: nil
+        , pViewportState: unsafeAddr vkViewportStateCreateInfo
+        , pRasterizationState: unsafeAddr vkPipelineRasterizationStateCreateInfo
+        , pMultisampleState: unsafeAddr vkPipelineMultisampleStateCreateInfo
+        , pDepthStencilState: unsafeAddr vkDepthState
+        , pColorBlendState: unsafeAddr vkColorBlendState
+        , pDynamicState: unsafeAddr vkDynamicStateCreateInfo
+        , layout: vkPipelineLayout
+        , renderPass: vkRenderPass
+        , subpass: 0
+        , basePipelineHandle: 0
+        , basePipelineIndex: 0
+    )
+var vkPipeline: VkPipeline
+vkCheck vkCreateGraphicsPipelines(vkDevice, vkNullHandle, 1, unsafeAddr vkPipelineCreateInfo, nil, addr vkPipeline)
+
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
 
@@ -679,6 +808,7 @@ block GameLoop:
     
         render()
 
+vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
 vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
 vkDestroyShaderModule(vkDevice, vkVertexShaderModule, nil)

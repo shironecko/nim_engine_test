@@ -124,6 +124,8 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkDestroyShaderModule
     vkCreatePipelineLayout
     vkDestroyPipelineLayout
+    vkCreateGraphicsPipelines
+    vkDestroyPipeline
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym
