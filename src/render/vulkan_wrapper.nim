@@ -271,3 +271,70 @@ proc vkwAllocateDeviceMemory*(device: VkDevice, deviceMemoryProperties: VkPhysic
         memoryTypeBits = memoryTypeBits shr 1
     
     vkCheck vkAllocateMemory(device ,addr allocateInfo, nil, addr result)
+
+type
+    VkwPresentBeginData* = object
+        presentCompleteSemaphore*, renderingCompleteSemaphore*: VkSemaphore
+        imageIndex*: uint32
+
+proc vkwPresentBegin*(device: VkDevice, swapchain: VkSwapchainKHR, commandBuffer: VkCommandBuffer): VkwPresentBeginData =
+    let semaphoreCreateInfo = VkSemaphoreCreateInfo(
+        sType: VkStructureType.semaphoreCreateInfo
+        , pNext: nil
+        , flags: 0
+    )
+    vkCheck vkCreateSemaphore(device, unsafeAddr semaphoreCreateInfo, nil, addr result.presentCompleteSemaphore )
+    vkCheck vkCreateSemaphore(device, unsafeAddr semaphoreCreateInfo, nil, addr result.renderingCompleteSemaphore)
+
+    vkCheck vkAcquireNextImageKHR(device, swapchain, high uint64, result.presentCompleteSemaphore, vkNullHandle, addr result.imageIndex)
+
+    let commandBufferBeginInfo = VkCommandBufferBeginInfo(
+        sType: VkStructureType.commandBufferBeginInfo
+        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
+    )
+    vkCheck vkBeginCommandBuffer(commandBuffer, unsafeAddr commandBufferBeginInfo)
+
+proc vkwPresentEnd*(device: VkDevice, swapchain: var VkSwapchainKHR, commandBuffer: var VkCommandBuffer, queue: VkQueue, presentBeginData: var VkwPresentBeginData) =
+    vkCheck vkEndCommandBuffer(commandBuffer)
+
+    var
+        renderFence: VkFence
+        fenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
+    vkCheck vkCreateFence(device, addr fenceCreateInfo, nil, addr renderFence)
+
+    let
+        waitStageMask: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.bottomOfPipe
+        submitInfo = VkSubmitInfo(
+            sType: VkStructureType.submitInfo
+            , waitSemaphoreCount: 1
+            , pWaitSemaphores: addr presentBeginData.presentCompleteSemaphore
+            , pWaitDstStageMask: unsafeAddr waitStageMask
+            , commandBufferCount: 1
+            , pCommandBuffers: addr commandBuffer
+            , signalSemaphoreCount: 1
+            , pSignalSemaphores: addr presentBeginData.renderingCompleteSemaphore
+        )
+    vkCheck vkQueueSubmit(queue, 1, unsafeAddr submitInfo, renderFence)
+    vkCheck vkWaitForFences(device, 1, addr renderFence, vkTrue, high uint64)
+    vkDestroyFence(device, renderFence, nil)
+    vkCheck vkResetCommandBuffer(commandBuffer, 0)
+
+    let presentInfo = VkPresentInfoKHR(
+        sType: VkStructureType.presentInfoKHR
+        , waitSemaphoreCount: 1
+        , pWaitSemaphores: addr presentBeginData.renderingCompleteSemaphore
+        , swapchainCount: 1
+        , pSwapchains: addr swapchain
+        , pImageIndices: addr presentBeginData.imageIndex
+        , pResults: nil
+    )
+    vkCheck vkQueuePresentKHR(queue, unsafeAddr presentInfo)
+
+    vkDestroySemaphore(device, presentBeginData.presentCompleteSemaphore, nil)
+    vkDestroySemaphore(device, presentBeginData.renderingCompleteSemaphore, nil)
+
+    presentBeginData = VkwPresentBeginData(
+        presentCompleteSemaphore: vkNullHandle
+        , renderingCompleteSemaphore: vkNullHandle
+        , imageIndex: high uint32
+    )

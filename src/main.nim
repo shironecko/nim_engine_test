@@ -293,19 +293,63 @@ vkCheck vkAllocateCommandBuffers(vkDevice, unsafeAddr vkCommandBufferAllocateInf
 vkCheck vkAllocateCommandBuffers(vkDevice, unsafeAddr vkCommandBufferAllocateInfo, addr vkRenderCmdBuffer)
 
 let vkSwapchainImages = vkGetSwapchainImagesKHR(vkDevice, vkSwapchain)
-var vkPresentImagesViewCreateInfo = VkImageViewCreateInfo(
-    sType: VkStructureType.imageViewCreateInfo
-    , viewType: VkImageViewType.twoDee
-    , format: colorFormat
-    , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
-    , subresourceRange: VkImageSubresourceRange(
-        aspectMask: uint32 VkImageAspectFlagBits.color
-        , baseMipLevel: 0
-        , levelCount: 1
-        , baseArrayLayer: 0
-        , layerCount: 1
+var vkImageTransitionStatus = repeat(false, vkSwapchainImages.len())
+while vkImageTransitionStatus.any(proc (x: bool): bool = not x):
+    var presentBeginData = vkwPresentBegin(vkDevice, vkSwapchain, vkSetupCmdBuffer)
+
+    if not vkImageTransitionStatus[int presentBeginData.imageIndex]:
+        vkImageTransitionStatus[int presentBeginData.imageIndex] = true
+
+        let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
+            sType: VkStructureType.imageMemoryBarrier
+            , srcAccessMask: 0
+            , dstAccessMask: uint32 VkAccessFlagBits.memoryRead
+            , oldLayout: VkImageLayout.undefined
+            , newLayout: VkImageLayout.presentSrcKHR
+            , srcQueueFamilyIndex: high uint32
+            , dstQueueFamilyIndex: high uint32
+            , image: vkSwapchainImages[int presentBeginData.imageIndex]
+            , subresourceRange: VkImageSubresourceRange(
+                aspectMask: uint32 VkImageAspectFlagBits.color
+                , baseMipLevel: 0
+                , levelCount: 1
+                , baseArrayLayer: 0
+                , layerCount: 1
+            )
+        )
+        vkCheck vkCmdPipelineBarrier(
+            vkSetupCmdBuffer
+            , uint32 VkPipelineStageFlagBits.topOfPipe
+            , uint32 VkPipelineStageFlagBits.topOfPipe
+            , 0
+            , 0, nil
+            , 0, nil
+            , 1, unsafeAddr vkLayoutTransitionBarrier
+        )
+    
+    vkwPresentEnd(vkDevice, vkSwapchain, vkSetupCmdBuffer, vkQueue, presentBeginData)
+
+var
+    vkPresentImagesViewCreateInfo = VkImageViewCreateInfo(
+        sType: VkStructureType.imageViewCreateInfo
+        , viewType: VkImageViewType.twoDee
+        , format: colorFormat
+        , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
+        , subresourceRange: VkImageSubresourceRange(
+            aspectMask: uint32 VkImageAspectFlagBits.color
+            , baseMipLevel: 0
+            , levelCount: 1
+            , baseArrayLayer: 0
+            , layerCount: 1
+        )
     )
-)
+    vkImageViews: seq[VkImageView]
+
+for img in vkSwapchainImages:
+    vkPresentImagesViewCreateInfo.image = img
+    var vkImageView: VkImageView
+    vkCheck vkCreateImageView(vkDevice, unsafeAddr vkPresentImagesViewCreateInfo, nil, addr vkImageView)
+    vkImageViews.add vkImageView
 
 let
     vkCommandBufferBeginInfo = VkCommandBufferBeginInfo(
@@ -315,62 +359,6 @@ let
     vkFenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
 var vkSubmitFence: VkFence
 vkCheck vkCreateFence(vkDevice, unsafeAddr vkFenceCreateInfo, nil, addr vkSubmitFence)
-
-var vkImageViews: seq[VkImageView]
-for img in vkSwapchainImages:
-    vkPresentImagesViewCreateInfo.image = img
-    vkCheck vkBeginCommandBuffer(vkSetupCmdBuffer, unsafeAddr vkCommandBufferBeginInfo)
-
-    let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
-        sType: VkStructureType.imageMemoryBarrier
-        , srcAccessMask: 0
-        , dstAccessMask: uint32 VkAccessFlagBits.memoryRead
-        , oldLayout: VkImageLayout.undefined
-        , newLayout: VkImageLayout.presentSrcKHR
-        , srcQueueFamilyIndex: 0xFFFFFFFF'u32
-        , dstQueueFamilyIndex: 0xFFFFFFFF'u32
-        , image: img
-        , subresourceRange: VkImageSubresourceRange(
-            aspectMask: uint32 VkImageAspectFlagBits.color
-            , baseMipLevel: 0
-            , levelCount: 1
-            , baseArrayLayer: 0
-            , layerCount: 1
-        )
-    )
-    vkCheck vkCmdPipelineBarrier(
-        vkSetupCmdBuffer
-        , uint32 VkPipelineStageFlagBits.topOfPipe
-        , uint32 VkPipelineStageFlagBits.topOfPipe
-        , 0
-        , 0, nil
-        , 0, nil
-        , 1, unsafeAddr vkLayoutTransitionBarrier
-    )
-
-    vkCheck vkEndCommandBuffer(vkSetupCmdBuffer)
-
-    let
-        vkWaitStageMask: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.colorAttachmentOutput
-        vkSubmitInfo = VkSubmitInfo(
-            sType: VkStructureType.submitInfo
-            , waitSemaphoreCount: 0
-            , pWaitSemaphores: nil
-            , pWaitDstStageMask: unsafeAddr vkWaitStageMask
-            , commandBufferCount: 1
-            , pCommandBuffers: addr vkSetupCmdBuffer
-            , signalSemaphoreCount: 0
-            , pSignalSemaphores: nil
-        )
-    vkCheck vkQueueSubmit(vkQueue, 1, unsafeAddr vkSubmitInfo, vkSubmitFence)
-    vkCheck vkWaitForFences(vkDevice, 1, addr vkSubmitFence, vkTrue, 0xFFFFFFFF_FFFFFFFF'u64)
-    vkCheck vkResetFences(vkDevice, 1, addr vkSubmitFence)
-
-    vkCheck vkResetCommandBuffer(vkSetupCmdBuffer, 0)
-
-    var vkImageView: VkImageView
-    vkCheck vkCreateImageView(vkDevice, unsafeAddr vkPresentImagesViewCreateInfo, nil, addr vkImageView)
-    vkImageViews.add vkImageView
 
 var vkDepthImageView: VkImageView
 block DepthStensilSetup:
@@ -737,23 +725,7 @@ var vkPipeline: VkPipeline
 vkCheck vkCreateGraphicsPipelines(vkDevice, vkNullHandle, 1, unsafeAddr vkPipelineCreateInfo, nil, addr vkPipeline)
 
 let render = proc() =
-    var presentCompleteSemaphore, renderingCompleteSemaphore : VkSemaphore
-    let semaphoreCreateInfo = VkSemaphoreCreateInfo(
-        sType: VkStructureType.semaphoreCreateInfo
-        , pNext: nil
-        , flags: 0
-    )
-    vkCheck vkCreateSemaphore(vkDevice, unsafeAddr semaphoreCreateInfo, nil, addr presentCompleteSemaphore )
-    vkCheck vkCreateSemaphore(vkDevice, unsafeAddr semaphoreCreateInfo, nil, addr renderingCompleteSemaphore)
-
-    var nextImageIdx: uint32
-    vkCheck vkAcquireNextImageKHR(vkDevice, vkSwapchain, 0xFFFFFFFF_FFFFFFFF'u64, presentCompleteSemaphore, vkNullHandle, addr nextImageIdx)
-
-    let commandBufferBeginInfo = VkCommandBufferBeginInfo(
-        sType: VkStructureType.commandBufferBeginInfo
-        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
-    )
-    vkCheck vkBeginCommandBuffer(vkRenderCmdBuffer, unsafeAddr commandBufferBeginInfo)
+    var presentBeginData = vkwPresentBegin(vkDevice, vkSwapchain, vkRenderCmdBuffer)
 
     let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
         sType: VkStructureType.imageMemoryBarrier
@@ -761,9 +733,9 @@ let render = proc() =
         , dstAccessMask: uint32 maskCombine(VkAccessFlagBits.colorAttachmentRead, VkAccessFlagBits.colorAttachmentWrite)
         , oldLayout: VkImageLayout.presentSrcKHR
         , newLayout: VkImageLayout.colorAttachmentOptimal
-        , srcQueueFamilyIndex: 0xFFFFFFFF'u32
-        , dstQueueFamilyIndex: 0xFFFFFFFF'u32
-        , image: vkSwapchainImages[int nextImageIdx]
+        , srcQueueFamilyIndex: high uint32
+        , dstQueueFamilyIndex: high uint32
+        , image: vkSwapchainImages[int presentBeginData.imageIndex]
         , subresourceRange: VkImageSubresourceRange(
             aspectMask: uint32 VkImageAspectFlagBits.color
             , baseMipLevel: 0
@@ -797,7 +769,7 @@ let render = proc() =
         renderPassBeginInfo = VkRenderPassBeginInfo(
             sType: VkStructureType.renderPassBeginInfo
             , renderPass: vkRenderPass
-            , framebuffer: vkFrameBuffers[int nextImageIdx]
+            , framebuffer: vkFrameBuffers[int presentBeginData.imageIndex]
             , renderArea: renderArea
             , clearValueCount: 2
             , pClearValues: unsafeAddr clearValues[0]
@@ -823,9 +795,9 @@ let render = proc() =
         , dstAccessMask: uint32 VkAccessFlagBits.memoryRead
         , oldLayout: VkImageLayout.colorAttachmentOptimal
         , newLayout: VkImageLayout.presentSrcKHR
-        , srcQueueFamilyIndex: 0xFFFFFFFF'u32
-        , dstQueueFamilyIndex: 0xFFFFFFFF'u32
-        , image: vkSwapchainImages[int nextImageIdx]
+        , srcQueueFamilyIndex: high uint32
+        , dstQueueFamilyIndex: high uint32
+        , image: vkSwapchainImages[int presentBeginData.imageIndex]
         , subresourceRange: VkImageSubresourceRange(
             aspectMask: uint32 VkImageAspectFlagBits.color
             , baseMipLevel: 0
@@ -844,44 +816,8 @@ let render = proc() =
         , 0, nil
         , 1, unsafeAddr prePresentBarrier
     )
-
-    vkCheck vkEndCommandBuffer(vkRenderCmdBuffer)
-
-    var
-        renderFence: VkFence
-        fenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
-    vkCheck vkCreateFence(vkDevice, addr fenceCreateInfo, nil, addr renderFence)
-
-    let
-        waitStageMash: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.bottomOfPipe
-        submitInfo = VkSubmitInfo(
-            sType: VkStructureType.submitInfo
-            , waitSemaphoreCount: 1
-            , pWaitSemaphores: addr presentCompleteSemaphore
-            , pWaitDstStageMask: unsafeAddr waitStageMash
-            , commandBufferCount: 1
-            , pCommandBuffers: addr vkRenderCmdBuffer
-            , signalSemaphoreCount: 1
-            , pSignalSemaphores: addr renderingCompleteSemaphore
-        )
-    vkCheck vkQueueSubmit(vkQueue, 1, unsafeAddr submitInfo, renderFence)
-
-    vkCheck vkWaitForFences(vkDevice, 1, addr renderFence, vkTrue, 0xFFFFFFFF_FFFFFFFF'u64)
-    vkDestroyFence(vkDevice, renderFence, nil)
-
-    let presentInfo = VkPresentInfoKHR(
-        sType: VkStructureType.presentInfoKHR
-        , waitSemaphoreCount: 1
-        , pWaitSemaphores: addr renderingCompleteSemaphore
-        , swapchainCount: 1
-        , pSwapchains: addr vkSwapchain
-        , pImageIndices: addr nextImageIdx
-        , pResults: nil
-    )
-    vkCheck vkQueuePresentKHR(vkQueue, unsafeAddr presentInfo)
-
-    vkDestroySemaphore(vkDevice, presentCompleteSemaphore, nil)
-    vkDestroySemaphore(vkDevice, renderingCompleteSemaphore, nil)
+    
+    vkwPresentEnd(vkDevice, vkSwapchain, vkRenderCmdBuffer, vkQueue, presentBeginData)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
