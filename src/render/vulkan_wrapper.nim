@@ -5,6 +5,7 @@ import strformat
 import macros
 import sdl2/sdl except VkInstance, VkSurfaceKHR
 import ../log
+import ../utility
 import vulkan as vk
 
 type
@@ -202,3 +203,52 @@ generateVulkanArrayGetterWrapper vkEnumerateDeviceExtensionPropertiesRaw, vkEnum
 generateVulkanArrayGetterWrapper vkGetSwapchainImagesKHRRaw, vkGetSwapchainImagesKHR, VkImage:
     device: VkDevice
     swapChain: VkSwapchainKHR
+
+type
+    GPUVendor* {.pure.} = enum
+        AMD, NVidia, Intel, ARM, Qualcomm, ImgTec, Unknown
+
+proc vkVendorIDToGPUVendor*(vendorID: uint32): GPUVendor =
+    case vendorID:
+        of 0x1002: GPUVendor.AMD
+        of 0x10DE: GPUVendor.NVidia
+        of 0x8086: GPUVendor.Intel
+        of 0x13B5: GPUVendor.ARM
+        of 0x5143: GPUVendor.Qualcomm
+        of 0x1010: GPUVendor.ImgTec
+        else: GPUVendor.Unknown
+
+type
+    VkwPhysicalDeviceDescription* = object
+        handle*: VkPhysicalDevice
+        name*: string
+        vendor*: GPUVendor
+        properties*: VkPhysicalDeviceProperties
+        memoryProperties*: VkPhysicalDeviceMemoryProperties
+        extensions*: seq[VkExtensionProperties]
+        queueFamilies*: seq[VkQueueFamilyProperties]
+        hasPresentQueue*: bool
+        presentQueueIdx*: uint32
+
+proc vkwEnumeratePhysicalDevicesWithDescriptions*(instance: VkInstance, surface: VkSurfaceKHR): seq[VkwPhysicalDeviceDescription] =
+    let devices = vkEnumeratePhysicalDevices(instance)
+    vkCheck devices.len() != 0, "Failed to find any compatible devices!"
+
+    devices.map(proc (device: VkPhysicalDevice): VkwPhysicalDeviceDescription =
+        result.handle = device
+        vkGetPhysicalDeviceProperties(device, addr result.properties)
+        vkGetPhysicalDeviceMemoryProperties(device, addr result.memoryProperties)
+        result.name = charArrayToString(result.properties.deviceName)
+        result.vendor = vkVendorIDToGPUVendor(result.properties.vendorID)
+        result.extensions = vkEnumerateDeviceExtensionProperties(device, nil)
+        result.queueFamilies = vkGetPhysicalDeviceQueueFamilyProperties(device)
+        result.hasPresentQueue = false
+        result.presentQueueIdx = high(uint32)
+        for i, q in result.queueFamilies:
+            var surfaceSupported: VkBool32
+            vkCheck vkGetPhysicalDeviceSurfaceSupportKHR(device, uint32 i, surface, addr surfaceSupported)
+            if surfaceSupported == vkTrue and maskCheck(q.queueFlags, VkQueueFlagBits.graphics):
+                result.hasPresentQueue = true
+                result.presentQueueIdx = uint32 i
+                break
+    )

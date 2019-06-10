@@ -138,58 +138,26 @@ block SetupVulkanDebugCallback:
 var vkSurface: vk.VkSurfaceKHR
 sdlCheck vulkanCreateSurface(window, cast[sdl.VkInstance](vkInstance), addr vkSurface)
 
-type
-    GPUVendor {.pure.} = enum
-        AMD, NVidia, Intel, ARM, Qualcomm, ImgTec, Unknown
-proc vkVendorIDToGPUVendor(vendorID: uint32): GPUVendor =
-    case vendorID:
-        of 0x1002: GPUVendor.AMD
-        of 0x10DE: GPUVendor.NVidia
-        of 0x8086: GPUVendor.Intel
-        of 0x13B5: GPUVendor.ARM
-        of 0x5143: GPUVendor.Qualcomm
-        of 0x1010: GPUVendor.ImgTec
-        else: GPUVendor.Unknown
-
-let vkDevices = vkEnumeratePhysicalDevices(vkInstance)
-vkCheck vkDevices.len() != 0, "Failed to find any compatible devices!"
-
-let vkDevicesWithProperties = vkDevices.map(proc (device: VkPhysicalDevice): tuple[
-        id: VkPhysicalDevice
-        , props: VkPhysicalDeviceProperties
-        , memoryProps: VkPhysicalDeviceMemoryProperties
-        , queues: seq[VkQueueFamilyProperties]
-        , presentQueueIdx: uint32
-    ] =
-    result.id = device
-    vkGetPhysicalDeviceProperties(device, addr result.props)
-    vkGetPhysicalDeviceMemoryProperties(device, addr result.memoryProps)
-
-    result.queues = vkGetPhysicalDeviceQueueFamilyProperties(device)
-    result.presentQueueIdx = 0xFFFFFFFF'u32
-    for i, q in result.queues:
-        var surfaceSupported: VkBool32
-        vkCheck vkGetPhysicalDeviceSurfaceSupportKHR(device, uint32 i, vkSurface, addr surfaceSupported)
-        if surfaceSupported == vkTrue and maskCheck(q.queueFlags, VkQueueFlagBits.graphics):
-            result.presentQueueIdx = uint32 i
-            break
-)
+let vkDevices = vkwEnumeratePhysicalDevicesWithDescriptions(vkInstance, vkSurface)
+vkCheck vkDevices.len() != 0, "Failed to find any Vulkan compatible devices!"
 
 vkLog LTrace, "[Devices]"
-for d in vkDevicesWithProperties:
-    vkLog LTrace, &"\t{charArrayToString d[1].deviceName}"
-    vkLog LTrace, &"\t\tType {d.props.deviceType} API {makeVulkanVersionInfo d.props.apiVersion} Driver {d.props.driverVersion} Vendor {vkVendorIDToGPUVendor d.props.vendorID}"
-let vkCompatibleDevices = vkDevicesWithProperties.filter((d) => d.presentQueueIdx != 0xFFFFFFFF'u32)
-vkLog LInfo, "[Compatible Devices]"
-vkCheck vkCompatibleDevices.len != 0, "No compatible devices found!"
-for d in vkCompatibleDevices:
-    vkLog LInfo, &"\t{charArrayToString d.props.deviceName}"
-let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
-vkLog LInfo, &"Selected physical device: {charArrayToString vkSelectedPhysicalDevice.props.deviceName}"
+for d in vkDevices:
+    vkLog LTrace, &"\t{d.name}"
+    vkLog LTrace, &"\t\tType {d.properties.deviceType} API {makeVulkanVersionInfo d.properties.apiVersion} Driver {d.properties.driverVersion} Vendor {d.vendor}"
 
-let vkDeviceExtensions = vkEnumerateDeviceExtensionProperties(vkSelectedPhysicalDevice.id, nil)
+let vkCompatibleDevices = vkDevices.filter((d) => d.hasPresentQueue)
+vkCheck vkCompatibleDevices.len != 0, "No devices with a present queue found!"
+
+vkLog LInfo, "[Compatible Devices]"
+for d in vkCompatibleDevices:
+    vkLog LInfo, &"\t{d.name}"
+
+let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
+vkLog LInfo, &"Selected physical device: {charArrayToString vkSelectedPhysicalDevice.name}"
+
 vkLog LTrace, "[Device Extensions]"
-for ex in vkDeviceExtensions:
+for ex in vkSelectedPhysicalDevice.extensions:
     vkLog LTrace, &"\t{charArrayToString(ex.extensionName)}({makeVulkanVersionInfo(ex.specVersion)})"
 
 var
@@ -216,10 +184,10 @@ var
         , pEnabledFeatures: addr deviceFeatures
     )
     vkDevice: VkDevice
-vkCheck vkCreateDevice(vkSelectedPhysicalDevice.id, addr deviceInfo, nil, addr vkDevice)
+vkCheck vkCreateDevice(vkSelectedPhysicalDevice.handle, addr deviceInfo, nil, addr vkDevice)
 deallocCStringArray(deviceExtensionsCStrings)
 
-let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.id, vkSurface)
+let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.handle, vkSurface)
 vkLog LTrace, "[Surface Formats]"
 for fmt in surfaceFormats:
     vkLog LTrace, &"\t{fmt.format}"
@@ -234,7 +202,7 @@ let colorSpace = surfaceFormats[0].colorSpace
 vkLog LInfo, &"Selected surface format: {colorFormat}, colorspace: {colorSpace}"
 
 var vkSurfaceCapabilities: VkSurfaceCapabilitiesKHR
-vkCheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkSelectedPhysicalDevice.id, vkSurface, addr vkSurfaceCapabilities)
+vkCheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkSelectedPhysicalDevice.handle, vkSurface, addr vkSurfaceCapabilities)
 var desiredImageCount = 2'u32
 if desiredImageCount < vkSurfaceCapabilities.minImageCount: 
     desiredImageCount = vkSurfaceCapabilities.minImageCount
@@ -252,7 +220,7 @@ var preTransform = vkSurfaceCapabilities.currentTransform
 if maskCheck(vkSurfaceCapabilities.supportedTransforms, VkSurfaceTransformFlagBitsKHR.identity):
     preTransform = VkSurfaceTransformFlagBitsKHR.identity
 
-let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.id, vkSurface)
+let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.handle, vkSurface)
 vkLog LTrace, &"Present modes: {presentModes}"
 var presentMode = VkPresentModeKHR.fifo
 for pm in presentModes:
@@ -308,7 +276,7 @@ var
     vkMemoryTypeBits = vkMemoryRequirements.memoryTypeBits
     vkDesiredMemoryFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal
 for i in 0..<32:
-    let memoryType = vkSelectedPhysicalDevice.memoryProps.memoryTypes[i]
+    let memoryType = vkSelectedPhysicalDevice.memoryProperties.memoryTypes[i]
     if maskCheck(vkMemoryTypeBits, 1):
         if maskCheck(memoryType.propertyFlags, vkDesiredMemoryFlags):
             vkImageAllocateInfo.memoryTypeIndex = uint32 i
@@ -580,7 +548,7 @@ var vkBufferAllocateInfo = VkMemoryAllocateInfo(
 var vkVertexMemoryTypeBits = vkVertexBufferMemoryRequirements.memoryTypeBits
 let vkVertexDeisredMemoryFlags: VkMemoryPropertyFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible
 for i in 0..<32:
-    let memoryType = vkSelectedPhysicalDevice.memoryProps.memoryTypes[i]
+    let memoryType = vkSelectedPhysicalDevice.memoryProperties.memoryTypes[i]
     if maskCheck(vkVertexMemoryTypeBits, 1):
         if maskCheck(memoryType.propertyFlags, vkVertexDeisredMemoryFlags):
             vkBufferAllocateInfo.memoryTypeIndex = uint32 i
