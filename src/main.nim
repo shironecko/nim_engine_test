@@ -817,11 +817,14 @@ let render = proc() =
         , 1, unsafeAddr vkLayoutTransitionBarrier
     )
     let
-        clearValue = VkClearValue(
-            color: VkClearColorValue(float32: [1.0'f32, 1.0, 1.0, 1.0])
-            , depthStencil: VkClearDepthStencilValue(depth: 1.0, stencil: 0)
-        )
-        clearValues = @[clearValue, clearValue]
+        clearValues = @[
+            VkClearValue(
+                color: VkClearColorValue(float32: [1.0'f32, 1.0, 1.0, 1.0])
+            )
+            , VkClearValue(
+                depthStencil: VkClearDepthStencilValue(depth: 1.0, stencil: 0)
+            )
+        ]
         renderArea = VkRect2D(
             offset: VkOffset2D(x: 0, y: 0)
             , extent: VkExtent2D(width: surfaceResolution.width, height: surfaceResolution.height)
