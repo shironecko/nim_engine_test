@@ -278,8 +278,6 @@ let swapChainCreateInfo = VkSwapchainCreateInfoKHR(
         , oldSwapchain: nil
     )
 var vkSwapchain: VkSwapchainKHR
-doAssert(vkCreateSwapchainKHR != nil)
-echo vkCreateSwapchainKHR == nil
 vkCheck vkCreateSwapchainKHR(vkDevice, unsafeAddr swapChainCreateInfo, nil, addr vkSwapchain)
 
 let vkImageCreateInfo = VkImageCreateInfo(
@@ -941,6 +939,7 @@ vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
 vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
 vkDestroyShaderModule(vkDevice, vkVertexShaderModule, nil)
+vkDestroyBuffer(vkDevice, vkVertexInputBuffer, nil)
 vkFreeMemory(vkDevice, vkVertexBufferMemory, nil)
 for fb in vkFramebuffers:
     vkDestroyFramebuffer(vkDevice, fb, nil)
