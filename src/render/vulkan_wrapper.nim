@@ -253,14 +253,13 @@ proc vkwEnumeratePhysicalDevicesWithDescriptions*(instance: VkInstance, surface:
                 break
     )
 
-proc vkwAllocateDeviceMemory*(device: VkDevice, deviceMemoryProperties: VkPhysicalDeviceMemoryProperties, requirements: VkMemoryRequirements): VkDeviceMemory =
+proc vkwAllocateDeviceMemory*(device: VkDevice, deviceMemoryProperties: VkPhysicalDeviceMemoryProperties, requirements: VkMemoryRequirements, desiredMemoryFlags: VkMemoryPropertyFlags): VkDeviceMemory =
     var 
         allocateInfo = VkMemoryAllocateInfo(
             sType: VkStructureType.memoryAllocateInfo
             , allocationSize: requirements.size
         )
         memoryTypeBits = requirements.memoryTypeBits
-        desiredMemoryFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal
     
     for i in 0..<32:
         let memoryType = deviceMemoryProperties.memoryTypes[i]

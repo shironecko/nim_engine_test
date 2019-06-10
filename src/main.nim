@@ -268,7 +268,7 @@ vkCheck vkCreateImage(vkDevice, unsafeAddr vkImageCreateInfo, nil, addr vkDepthI
 
 var vkMemoryRequirements: VkMemoryRequirements
 vkCheck vkGetImageMemoryRequirements(vkDevice, vkDepthImage, addr vkMemoryRequirements)
-var vkImageMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkMemoryRequirements)
+var vkImageMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal)
 vkCheck vkBindImageMemory(vkDevice, vkDepthImage, vkImageMemory, 0)
 
 var vkQueue: VkQueue
@@ -523,23 +523,7 @@ vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkVertexBufferCreateInfo, nil, addr 
 
 var vkVertexBufferMemoryRequirements: VkMemoryRequirements
 vkGetBufferMemoryRequirements(vkDevice, vkVertexInputBuffer, addr vkVertexBufferMemoryRequirements)
-
-var vkBufferAllocateInfo = VkMemoryAllocateInfo(
-    sType: VkStructureType.memoryAllocateInfo
-    , allocationSize: vkVertexBufferMemoryRequirements.size
-)
-
-var vkVertexMemoryTypeBits = vkVertexBufferMemoryRequirements.memoryTypeBits
-let vkVertexDeisredMemoryFlags: VkMemoryPropertyFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible
-for i in 0..<32:
-    let memoryType = vkSelectedPhysicalDevice.memoryProperties.memoryTypes[i]
-    if maskCheck(vkVertexMemoryTypeBits, 1):
-        if maskCheck(memoryType.propertyFlags, vkVertexDeisredMemoryFlags):
-            vkBufferAllocateInfo.memoryTypeIndex = uint32 i
-            break
-    vkVertexMemoryTypeBits = vkVertexMemoryTypeBits shr 1
-var vkVertexBufferMemory: VkDeviceMemory
-vkCheck vkAllocateMemory(vkDevice, addr vkBufferAllocateInfo, nil, addr vkVertexBufferMemory)
+var vkVertexBufferMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkVertexBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
 
 var vkVertexMappedMem: CArray[Vertex]
 vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
