@@ -367,7 +367,7 @@ var vkSubmitFence: VkFence
 vkCheck vkCreateFence(vkDevice, unsafeAddr vkFenceCreateInfo, nil, addr vkSubmitFence)
 
 var vkImageViews: seq[VkImageView]
-for i, img in vkSwapchainImages:
+for img in vkSwapchainImages:
     vkPresentImagesViewCreateInfo.image = img
     vkCheck vkBeginCommandBuffer(vkSetupCmdBuffer, unsafeAddr vkCommandBufferBeginInfo)
 
@@ -388,7 +388,6 @@ for i, img in vkSwapchainImages:
             , layerCount: 1
         )
     )
-    vkLog LTrace, &"Img setup pipeline barrier {i}"
     vkCheck vkCmdPipelineBarrier(
         vkSetupCmdBuffer
         , uint32 VkPipelineStageFlagBits.topOfPipe
@@ -447,11 +446,10 @@ block DepthStensilSetup:
             , layerCount: 1
         )
     )
-    vkLog LTrace, "Depth buffer pipeline barrier"
     vkCheck vkCmdPipelineBarrier(
         vkSetupCmdBuffer
         , uint32 VkPipelineStageFlagBits.topOfPipe
-        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , uint32 VkPipelineStageFlagBits.earlyFragmentTests
         , 0
         , 0, nil
         , 0, nil
@@ -776,8 +774,6 @@ var vkPipeline: VkPipeline
 vkCheck vkCreateGraphicsPipelines(vkDevice, vkNullHandle, 1, unsafeAddr vkPipelineCreateInfo, nil, addr vkPipeline)
 
 let render = proc() =
-    vkLog LTrace, "[Frame Start]"
-
     var presentCompleteSemaphore, renderingCompleteSemaphore : VkSemaphore
     let semaphoreCreateInfo = VkSemaphoreCreateInfo(
         sType: VkStructureType.semaphoreCreateInfo
@@ -813,11 +809,10 @@ let render = proc() =
             , layerCount: 1
         )
     )
-    vkLog LTrace, "Render pipeline barrier"
     vkCheck vkCmdPipelineBarrier(
         vkRenderCmdBuffer
         , uint32 VkPipelineStageFlagBits.topOfPipe
-        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , uint32 VkPipelineStageFlagBits.colorAttachmentOutput
         , 0
         , 0, nil
         , 0, nil
@@ -922,8 +917,6 @@ let render = proc() =
     vkDestroySemaphore(vkDevice, presentCompleteSemaphore, nil)
     vkDestroySemaphore(vkDevice, renderingCompleteSemaphore, nil)
 
-    vkLog LTrace, "[Frame End]"
-
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
 
@@ -943,7 +936,6 @@ block GameLoop:
                     windowDimentions = newWindowDimensions
     
         render()
-        break
 
 vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
