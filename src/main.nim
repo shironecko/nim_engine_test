@@ -591,9 +591,9 @@ vkCheck vkAllocateMemory(vkDevice, addr vkBufferAllocateInfo, nil, addr vkVertex
 
 var vkVertexMappedMem: CArray[Vertex]
 vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
-vkVertexMappedMem[0] = Vertex(x: -1.0, y: -1.0, z: 0, w: 1.0)
-vkVertexMappedMem[1] = Vertex(x:  1.0, y: -1.0, z: 0, w: 1.0)
-vkVertexMappedMem[2] = Vertex(x:  0.0, y:  1.0, z: 0, w: 1.0)
+vkVertexMappedMem[0] = Vertex(x: -0.9, y: -0.9, z: 0, w: 1.0)
+vkVertexMappedMem[1] = Vertex(x:  0.9, y: -0.9, z: 0, w: 1.0)
+vkVertexMappedMem[2] = Vertex(x:  0.0, y:  0.9, z: 0, w: 1.0)
 vkCheck vkUnmapMemory(vkDevice, vkVertexBufferMemory)
 vkCheck vkBindBufferMemory(vkDevice, vkVertexInputBuffer, vkVertexBufferMemory, 0)
 
@@ -819,7 +819,7 @@ let render = proc() =
     let
         clearValues = @[
             VkClearValue(
-                color: VkClearColorValue(float32: [1.0'f32, 1.0, 1.0, 1.0])
+                color: VkClearColorValue(float32: [0.8'f32, 0.8, 0.8, 1.0])
             )
             , VkClearValue(
                 depthStencil: VkClearDepthStencilValue(depth: 1.0, stencil: 0)
