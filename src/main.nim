@@ -268,23 +268,7 @@ vkCheck vkCreateImage(vkDevice, unsafeAddr vkImageCreateInfo, nil, addr vkDepthI
 
 var vkMemoryRequirements: VkMemoryRequirements
 vkCheck vkGetImageMemoryRequirements(vkDevice, vkDepthImage, addr vkMemoryRequirements)
-var vkImageAllocateInfo = VkMemoryAllocateInfo(
-    sType: VkStructureType.memoryAllocateInfo
-    , allocationSize: vkMemoryRequirements.size
-)
-var
-    vkMemoryTypeBits = vkMemoryRequirements.memoryTypeBits
-    vkDesiredMemoryFlags = VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal
-for i in 0..<32:
-    let memoryType = vkSelectedPhysicalDevice.memoryProperties.memoryTypes[i]
-    if maskCheck(vkMemoryTypeBits, 1):
-        if maskCheck(memoryType.propertyFlags, vkDesiredMemoryFlags):
-            vkImageAllocateInfo.memoryTypeIndex = uint32 i
-            break
-    vkMemoryTypeBits = vkMemoryTypeBits shr 1
-
-var vkImageMemory: VkDeviceMemory
-vkCheck vkAllocateMemory(vkDevice,addr vkImageAllocateInfo, nil, addr vkImageMemory)
+var vkImageMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkMemoryRequirements)
 vkCheck vkBindImageMemory(vkDevice, vkDepthImage, vkImageMemory, 0)
 
 var vkQueue: VkQueue
