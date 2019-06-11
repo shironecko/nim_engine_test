@@ -2,7 +2,7 @@ import strformat
 import nim_logger
 export nim_logger
 
-import sdl2/sdl except LogCategory
+import sdl2 except LogCategory
 import vulkan as vk
 
 type
@@ -35,14 +35,14 @@ proc check*(condition: bool, msg = "") =
 proc sdlCheck*(res: cint, msg = "") =
     if res != 0:
         if msg != "": sdlLog LCritical, msg
-        sdlLog LCritical, &"SDL Call Failed: {sdl.getError()}"
+        sdlLog LCritical, &"SDL Call Failed: {sdl2.getError()}"
         writeStackTrace()
         quit QuitFailure
 
 proc sdlCheck*(res: bool, msg = "") =
     if not res:
         if msg != "": sdlLog LCritical, msg
-        sdlLog LCritical, &"SDL Call Failed: {sdl.getError()}"
+        sdlLog LCritical, &"SDL Call Failed: {sdl2.getError()}"
         writeStackTrace()
         quit QuitFailure
 

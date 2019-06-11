@@ -6,8 +6,7 @@ template high*[T: uint64](_: typedesc[T]): uint64 = 0xFFFFFFFF_FFFFFFFF'u64
 template low*[T: uint64](_: typedesc[T]): uint64 = 0'u64
 
 type
-    CArrayData{.unchecked.}[T] = array[0..0, T]
-    CArray*[T] = ptr CArrayData[T]
+    CArray*[T] = ptr UncheckedArray[T]
 
 proc readBinaryFile*(path: string): seq[uint8] =
     var

@@ -2,8 +2,8 @@ import strutils
 import sequtils
 import sugar
 import strformat
-import sdl2/[sdl, sdl_syswm]
 import log
+import sdl2
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
 import render/vulkan_wrapper
 import utility
@@ -11,26 +11,26 @@ import utility
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
-sdlCheck sdl.init(INIT_EVERYTHING), "Failed to init :c"
+sdlCheck sdl2.init(INIT_EVERYTHING), "Failed to init :c"
 sdlCheck vulkanLoadLibrary(nil)
 loadVulkanAPI()
 
-var window: Window
+var window: WindowPtr
 window = createWindow(
     "SDL/Vulkan"
-    , WINDOWPOS_UNDEFINED
-    , WINDOWPOS_UNDEFINED
+    , SDL_WINDOWPOS_UNDEFINED
+    , SDL_WINDOWPOS_UNDEFINED
     , 640, 480
-    , WINDOW_VULKAN or WINDOW_SHOWN or WINDOW_RESIZABLE)
+    , SDL_WINDOW_VULKAN or SDL_WINDOW_SHOWN or SDL_WINDOW_RESIZABLE)
 sdlCheck window != nil, "Failed to create window!"
 
 type
     WindowDimentions = object
         width, height, fullWidth, fullHeight : int32
 
-proc getWindowDimentions(window : sdl.Window) : WindowDimentions =
-    sdl.getWindowSize(window, addr result.fullWidth, addr result.fullHeight)
-    sdl.vulkanGetDrawableSize(window, addr result.width, addr result.height)
+proc getWindowDimentions(window : WindowPtr) : WindowDimentions =
+    sdl2.getSize(window, result.fullWidth, result.fullHeight)
+    sdl2.vulkanGetDrawableSize(window, addr result.width, addr result.height)
 
 var windowDimentions = getWindowDimentions(window)
 
@@ -136,7 +136,7 @@ block SetupVulkanDebugCallback:
     vkCheck vkCreateDebugReportCallbackEXT(vkInstance, unsafeAddr vkCallbackCreateInfo, nil, addr vkDebugCallback)
 
 var vkSurface: vk.VkSurfaceKHR
-sdlCheck vulkanCreateSurface(window, cast[sdl.VkInstance](vkInstance), addr vkSurface)
+sdlCheck vulkanCreateSurface(window, cast[VulkanInstance](vkInstance), cast[ptr VulkanSurface](addr vkSurface))
 
 let vkDevices = vkwEnumeratePhysicalDevicesWithDescriptions(vkInstance, vkSurface)
 vkCheck vkDevices.len() != 0, "Failed to find any Vulkan compatible devices!"
@@ -154,7 +154,7 @@ for d in vkCompatibleDevices:
     vkLog LInfo, &"\t{d.name}"
 
 let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
-vkLog LInfo, &"Selected physical device: {charArrayToString vkSelectedPhysicalDevice.name}"
+vkLog LInfo, &"Selected physical device: {vkSelectedPhysicalDevice.name}"
 
 vkLog LTrace, "[Device Extensions]"
 for ex in vkSelectedPhysicalDevice.extensions:
@@ -884,14 +884,14 @@ proc updateRenderResolution(winDim : WindowDimentions) =
 
 updateRenderResolution(windowDimentions)
 
-var evt: sdl.Event
+var evt: sdl2.Event
 block GameLoop:
     while true:
-        while sdl.pollEvent(evt.addr) == 1:
-            if evt.kind == sdl.Quit:
+        while sdl2.pollEvent(evt) == True32:
+            if evt.kind == sdl2.QuitEvent:
                 break GameLoop
-            elif evt.kind == sdl.WINDOWEVENT:
-                var windowEvent = cast[WindowEventObj](evt.addr)
+            elif evt.kind == sdl2.WindowEvent:
+                var windowEvent = cast[WindowEventObj](addr evt)
                 let newWindowDimensions = getWindowDimentions(window)
                 if windowDimentions != newWindowDimensions:
                     updateRenderResolution(newWindowDimensions)
@@ -926,4 +926,4 @@ vkDestroyDevice(vkDevice, nil)
 vkDestroyDebugReportCallbackEXT(vkInstance, vkDebugCallback, nil)
 vkDestroyInstance(vkInstance, nil)
 destroyWindow(window)
-sdl.quit()
+sdl2.quit()

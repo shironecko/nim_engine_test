@@ -3,7 +3,7 @@ import sequtils
 import sugar
 import strformat
 import macros
-import sdl2/sdl except VkInstance, VkSurfaceKHR
+import sdl2 except VkInstance, VkSurfaceKHR
 import ../log
 import ../utility
 import vulkan as vk
