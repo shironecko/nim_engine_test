@@ -499,8 +499,9 @@ for i, piv in vkImageViews:
     vkCheck vkCreateFramebuffer(vkDevice, unsafeAddr framebufferCreateInfo, nil, addr vkFramebuffers[i])
 
 type
-    Vertex = object
+    Vertex {.packed.} = object
         x, y, z, w: float32
+        u, v: float32
 let vkVertexBufferCreateInfo = VkBufferCreateInfo(
     sType: VkStructureType.bufferCreateInfo
     , size: uint64 sizeof(Vertex) * 3
@@ -516,9 +517,15 @@ var vkVertexBufferMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalD
 
 var vkVertexMappedMem: CArray[Vertex]
 vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
-vkVertexMappedMem[0] = Vertex(x: -0.5, y: -0.5, z: 0, w: 1.0)
-vkVertexMappedMem[1] = Vertex(x:  0.5, y: -0.5, z: 0, w: 1.0)
-vkVertexMappedMem[2] = Vertex(x: -0.5, y:  0.5, z: 0, w: 1.0)
+vkVertexMappedMem[0] = Vertex(
+    x: -0.5, y: -0.5, z: 0, w: 1.0
+    , u: 0.0, v: 0.0)
+vkVertexMappedMem[1] = Vertex(
+    x:  0.5, y: -0.5, z: 0, w: 1.0
+    , u: 1.0, v: 0.0)
+vkVertexMappedMem[2] = Vertex(
+    x: -0.5, y:  0.5, z: 0, w: 1.0
+    , u: 0.0, v: 1.0)
 vkCheck vkUnmapMemory(vkDevice, vkVertexBufferMemory)
 vkCheck vkBindBufferMemory(vkDevice, vkVertexInputBuffer, vkVertexBufferMemory, 0)
 
@@ -649,18 +656,26 @@ let
         , stride: uint32 sizeof Vertex
         , inputRate: VkVertexInputRate.vertex
     )
-    vkVertexInputAttributeDescription = VkVertexInputAttributeDescription(
-        location: 0
-        , binding: 0
-        , format: VkFormat.r32g32b32a32SFloat
-        , offset: 0
-    )
+    vkVertexInputAttributeDescriptions = @[
+        VkVertexInputAttributeDescription(
+            location: 0
+            , binding: 0
+            , format: VkFormat.r32g32b32a32SFloat
+            , offset: 0
+        )
+        , VkVertexInputAttributeDescription(
+            location: 1
+            , binding: 0
+            , format: VkFormat.r32g32SFloat
+            , offset: 4 * sizeof(float32)
+        )
+    ]
     vkPipelineVertexInputStateCreateInfo = VkPipelineVertexInputStateCreateInfo(
         sType: VkStructureType.pipelineVertexInputStateCreateInfo
         , vertexBindingDescriptionCount: 1
         , pVertexBindingDescriptions: unsafeAddr vkVertexInputBindingDescription
-        , vertexAttributeDescriptionCount: 1
-        , pVertexAttributeDescriptions: unsafeAddr vkVertexInputAttributeDescription
+        , vertexAttributeDescriptionCount: uint32 vkVertexInputAttributeDescriptions.len()
+        , pVertexAttributeDescriptions: unsafeAddr vkVertexInputAttributeDescriptions[0]
     )
     vkPipelineInputAssemblyStateCreateInfo = VkPipelineInputAssemblyStateCreateInfo(
         sType: VkStructureType.pipelineInputAssemblyStateCreateInfo
