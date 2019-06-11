@@ -2,6 +2,7 @@ import strutils
 import sequtils
 import sugar
 import strformat
+import glm
 import log
 import sdl2
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
@@ -545,14 +546,16 @@ type
         memory: VkDeviceMemory
 var vkUniforms: ShaderUniform
 
-let 
-    vkIdentityMatrix = @[
-        1'f32, 0, 0, 0
-          , 0, 1, 0, 0
-          , 0, 0, 1, 0
-          , 0, 0, 0, 1
-    ]
-    vkBufferCreateInfo = VkBufferCreateInfo(
+var
+    vkModel = mat4(1.0'f32)
+    vkView = lookAt(
+        eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
+        , center = vec3(0.0'f32)
+        , up = vec3(0.0'f32, -1.0'f32, 0.0'f32)
+    )
+    vkProjection = ortho(-10.0'f32, 10.0'f32, 10.0'f32, -10.0'f32, 0.0'f32, 100.0'f32)
+    vkMVPMatrix = vkProjection * vkView * vkModel
+let vkBufferCreateInfo = VkBufferCreateInfo(
         sType: VkStructureType.bufferCreateInfo
         , size: sizeof(float32) * 16
         , usage: uint32 VkBufferUsageFlagBits.uniformBuffer
@@ -567,7 +570,7 @@ vkCheck vkBindBufferMemory(vkDevice, vkUniforms.buffer, vkUniforms.memory, 0)
 
 var vkMatrixMappedMem: pointer
 vkCheck vkMapMemory(vkDevice, vkUniforms.memory, 0, high uint64, 0, addr vkMatrixMappedMem)
-copyMem(vkMatrixMappedMem, unsafeAddr vkIdentityMatrix[0], sizeof(float32) * 16)
+copyMem(vkMatrixMappedMem, vkMVPMatrix.caddr, sizeof(float32) * 16)
 vkCheck vkUnmapMemory(vkDevice, vkUniforms.memory)
 
 let
