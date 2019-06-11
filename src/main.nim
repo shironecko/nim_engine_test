@@ -570,10 +570,67 @@ vkCheck vkMapMemory(vkDevice, vkUniforms.memory, 0, high uint64, 0, addr vkMatri
 copyMem(vkMatrixMappedMem, unsafeAddr vkIdentityMatrix[0], sizeof(float32) * 16)
 vkCheck vkUnmapMemory(vkDevice, vkUniforms.memory)
 
+let
+    vkBindings = VkDescriptorSetLayoutBinding(
+        binding: 0
+        , descriptorType: VkDescriptorType.uniformBuffer
+        , descriptorCount: 1
+        , stageFlags: uint32 VkShaderStageFlagBits.vertex
+        , pImmutableSamplers: nil
+    )
+    vkSetLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo(
+        sType: VkStructureType.descriptorSetLayoutCreateInfo
+        , bindingCount: 1
+        , pBindings: unsafeAddr vkBindings
+    )
+var vkSetLayout: VkDescriptorSetLayout
+vkCheck vkCreateDescriptorSetLayout(vkDevice, unsafeAddr vkSetLayoutCreateInfo, nil, addr vkSetLayout)
+let
+    vkUniformBufferPoolSize = VkDescriptorPoolSize(
+        descriptorType: VkDescriptorType.uniformBuffer
+        , descriptorCount: 1
+    )
+    vkPoolCreateInfo = VkDescriptorPoolCreateInfo(
+        sType: VkStructureType.descriptorPoolCreateInfo
+        , maxSets: 1
+        , poolSizeCount: 1
+        , pPoolSizes: unsafeAddr vkUniformBufferPoolSize
+    )
+var vkDescriptorPool: VkDescriptorPool
+vkCheck vkCreateDescriptorPool(vkDevice, unsafeAddr vkPoolCreateInfo, nil, addr vkDescriptorPool)
+
+let vkDescriptorAllocateInfo = VkDescriptorSetAllocateInfo(
+    sType: VkStructureType.descriptorSetAllocateInfo
+    , descriptorPool: vkDescriptorPool
+    , descriptorSetCount: 1
+    , pSetLayouts: addr vkSetLayout
+)
+var vkDescriptorSet: VkDescriptorSet
+vkCheck vkAllocateDescriptorSets(vkDevice, unsafeAddr vkDescriptorAllocateInfo, addr vkDescriptorSet)
+
+let
+    vkDescriptorBufferInfo = VkDescriptorBufferInfo(
+        buffer: vkUniforms.buffer
+        , offset: 0
+        , range: high uint64
+    )
+    vkWriteDescriptor = VkWriteDescriptorSet(
+        sType: VkStructureType.writeDescriptorSet
+        , dstSet: vkDescriptorSet
+        , dstBinding: 0
+        , dstArrayElement: 0
+        , descriptorCount: 1
+        , descriptorType: VkDescriptorType.uniformBuffer
+        , pImageInfo: nil
+        , pBufferInfo: unsafeAddr vkDescriptorBufferInfo
+        , pTexelBufferView: nil
+    )
+vkCheck vkUpdateDescriptorSets(vkDevice, 1, unsafeAddr vkWriteDescriptor, 0, nil)
+
 let vkPipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
     sType: VkStructureType.pipelineLayoutCreateInfo
-    , setLayoutCount: 0
-    , pSetLayouts: nil
+    , setLayoutCount: 1
+    , pSetLayouts: addr vkSetLayout
     , pushConstantRangeCount: 0
     , pPushConstantRanges: nil
 )
@@ -784,6 +841,7 @@ let render = proc() =
         scissor = renderArea
     vkCheck vkCmdSetViewport(vkRenderCmdBuffer, 0, 1, unsafeAddr viewport)
     vkCheck vkCmdSetScissor(vkRenderCmdBuffer, 0, 1, unsafeAddr scissor)
+    vkCheck vkCmdBindDescriptorSets(vkRenderCmdBuffer, VkPipelineBindPoint.graphics, vkPipelineLayout, 0, 1, addr vkDescriptorSet, 0, nil)
 
     var offsets: VkDeviceSize
     vkCheck vkCmdBindVertexBuffers(vkRenderCmdBuffer, 0, 1, addr vkVertexInputBuffer, addr offsets)
@@ -843,6 +901,8 @@ block GameLoop:
 
 vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
+vkDestroyDescriptorPool(vkDevice, vkDescriptorPool, nil)
+vkDestroyDescriptorSetLayout(vkDevice, vkSetlayout, nil)
 vkDestroyBuffer(vkDevice, vkUniforms.buffer, nil)
 vkFreeMemory(vkDevice, vkUniforms.memory, nil)
 vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
