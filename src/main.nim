@@ -16,13 +16,17 @@ sdlCheck sdl2.init(INIT_EVERYTHING), "Failed to init :c"
 sdlCheck vulkanLoadLibrary(nil)
 loadVulkanAPI()
 
+const
+    prefferedWidth = 512
+    prefferedHeight = 512
+
 var window: WindowPtr
 window = createWindow(
     "SDL/Vulkan"
     , SDL_WINDOWPOS_UNDEFINED
     , SDL_WINDOWPOS_UNDEFINED
-    , 640, 480
-    , SDL_WINDOW_VULKAN or SDL_WINDOW_SHOWN or SDL_WINDOW_RESIZABLE)
+    , prefferedWidth, prefferedHeight
+    , SDL_WINDOW_VULKAN or SDL_WINDOW_SHOWN)
 sdlCheck window != nil, "Failed to create window!"
 
 type
@@ -213,8 +217,8 @@ vkLog LInfo, &"Desired swapchain images: {desiredImageCount}"
 
 var surfaceResolution = vkSurfaceCapabilities.currentExtent
 if surfaceResolution.width == 0xFFFFFFFF'u32:
-    surfaceResolution.width = 640
-    surfaceResolution.height = 480
+    surfaceResolution.width = prefferedWidth
+    surfaceResolution.height = prefferedHeight
 vkLog LInfo, &"Surface resolution: {surfaceResolution}"
 
 var preTransform = vkSurfaceCapabilities.currentTransform
@@ -352,31 +356,31 @@ for img in vkSwapchainImages:
     vkCheck vkCreateImageView(vkDevice, unsafeAddr vkPresentImagesViewCreateInfo, nil, addr vkImageView)
     vkImageViews.add vkImageView
 
-let
-    vkCommandBufferBeginInfo = VkCommandBufferBeginInfo(
-        sType: VkStructureType.commandBufferBeginInfo
-        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
-    )
-    vkFenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
+let vkFenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
 var vkSubmitFence: VkFence
 vkCheck vkCreateFence(vkDevice, unsafeAddr vkFenceCreateInfo, nil, addr vkSubmitFence)
 
-var vkDepthImageView: VkImageView
-block DepthStensilSetup:
-    let beginInfo = VkCommandBufferBeginInfo(
-        sType: VkStructureType.commandBufferBeginInfo
-        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
-    )
-    vkCheck vkBeginCommandBuffer(vkSetupCmdBuffer, unsafeAddr beginInfo)
-    let layoutTransitionBarrier = VkImageMemoryBarrier(
-        sType: VkStructureType.imageMemoryBarrier
-        , srcAccessMask: 0
-        , dstAccessMask: uint32 maskCombine(VkAccessFlagBits.depthStencilAttachmentRead, VkAccessFlagBits.depthStencilAttachmentWrite)
-        , oldLayout: VkImageLayout.undefined
-        , newLayout: VkImageLayout.depthStencilAttachmentOptimal
-        , srcQueueFamilyIndex: 0xFFFFFFFF'u32
-        , dstQueueFamilyIndex: 0xFFFFFFFF'u32
+vkwTransitionImageLayout(
+    device = vkDevice
+    , image = vkDepthImage
+    , commandBuffer = vkSetupCmdBuffer
+    , queue = vkQueue
+    , fence = vkSubmitFence
+    , srcAccessMask = 0
+    , dstAccessMask = uint32 maskCombine(VkAccessFlagBits.depthStencilAttachmentRead, VkAccessFlagBits.depthStencilAttachmentWrite)
+    , oldLayout = VkImageLayout.undefined
+    , newLayout = VkImageLayout.depthStencilAttachmentOptimal
+    , srcStageMask = uint32 VkPipelineStageFlagBits.topOfPipe
+    , dstStageMask = uint32 VkPipelineStageFlagBits.earlyFragmentTests
+    , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.depth
+)
+let
+    imageViewCreateInfo = VkImageViewCreateInfo(
+        sType: VkStructureType.imageViewCreateInfo
         , image: vkDepthImage
+        , viewType: VkImageViewType.twoDee
+        , format: vkImageCreateInfo.format
+        , components: VkComponentMapping(r: VkComponentSwizzle.identity, g: VkComponentSwizzle.identity, b: VkComponentSwizzle.identity, a: VkComponentSwizzle.identity)
         , subresourceRange: VkImageSubresourceRange(
             aspectMask: uint32 VkImageAspectFlagBits.depth
             , baseMipLevel: 0
@@ -385,51 +389,8 @@ block DepthStensilSetup:
             , layerCount: 1
         )
     )
-    vkCheck vkCmdPipelineBarrier(
-        vkSetupCmdBuffer
-        , uint32 VkPipelineStageFlagBits.topOfPipe
-        , uint32 VkPipelineStageFlagBits.earlyFragmentTests
-        , 0
-        , 0, nil
-        , 0, nil
-        , 1, unsafeAddr layoutTransitionBarrier
-    )
-    vkCheck vkEndCommandBuffer(vkSetupCmdBuffer)
-
-    let
-        waitStageMask: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.colorAttachmentOutput
-        submitInfo = VkSubmitInfo(
-            sType: VkStructureType.submitInfo
-            , waitSemaphoreCount: 0
-            , pWaitSemaphores: nil
-            , pWaitDstStageMask: unsafeAddr waitStageMask
-            , commandBufferCount: 1
-            , pCommandBuffers: addr vkSetupCmdBuffer
-            , signalSemaphoreCount: 0
-            , pSignalSemaphores: nil
-        )
-    vkCheck vkQueueSubmit(vkQueue, 1, unsafeAddr submitInfo, vkSubmitFence)
-
-    vkCheck vkWaitForFences(vkDevice, 1, addr vkSubmitFence, vkTrue, 0xFFFFFFFF_FFFFFFFF'u64)
-    vkCheck vkResetFences(vkDevice, 1, addr vkSubmitFence)
-    vkCheck vkResetCommandBuffer(vkSetupCmdBuffer, 0)
-
-    let
-        imageViewCreateInfo = VkImageViewCreateInfo(
-            sType: VkStructureType.imageViewCreateInfo
-            , image: vkDepthImage
-            , viewType: VkImageViewType.twoDee
-            , format: vkImageCreateInfo.format
-            , components: VkComponentMapping(r: VkComponentSwizzle.identity, g: VkComponentSwizzle.identity, b: VkComponentSwizzle.identity, a: VkComponentSwizzle.identity)
-            , subresourceRange: VkImageSubresourceRange(
-                aspectMask: uint32 VkImageAspectFlagBits.depth
-                , baseMipLevel: 0
-                , levelCount: 1
-                , baseArrayLayer: 0
-                , layerCount: 1
-            )
-        )
-    vkCheck vkCreateImageView(vkDevice, unsafeAddr imageViewCreateInfo, nil, addr vkDepthImageView)
+var vkDepthImageView: VkImageView
+vkCheck vkCreateImageView(vkDevice, unsafeAddr imageViewCreateInfo, nil, addr vkDepthImageView)
 
 let
     passAttachments = @[
@@ -504,7 +465,7 @@ type
         u, v: float32
 let vkVertexBufferCreateInfo = VkBufferCreateInfo(
     sType: VkStructureType.bufferCreateInfo
-    , size: uint64 sizeof(Vertex) * 3
+    , size: uint64 sizeof(Vertex) * 6
     , usage: uint32 VkBufferUsageFlagBits.vertexBuffer
     , sharingMode: VkSharingMode.exclusive
 )
@@ -526,6 +487,11 @@ vkVertexMappedMem[1] = Vertex(
 vkVertexMappedMem[2] = Vertex(
     x: -0.5, y:  0.5, z: 0, w: 1.0
     , u: 0.0, v: 1.0)
+vkVertexMappedMem[3] = vkVertexMappedMem[1]
+vkVertexMappedMem[4] = Vertex(
+    x:  0.5, y:  0.5, z: 0, w: 1.0
+    , u: 1.0, v: 1.0)
+vkVertexMappedMem[5] = vkVertexMappedMem[2]
 vkCheck vkUnmapMemory(vkDevice, vkVertexBufferMemory)
 vkCheck vkBindBufferMemory(vkDevice, vkVertexInputBuffer, vkVertexBufferMemory, 0)
 
@@ -547,6 +513,110 @@ var
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkVertexShaderCreateInfo, nil, addr vkVertexShaderModule)
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkFragmentShaderCreateInfo, nil, addr vkFragmentShaderModule)
 
+var debugAtlasSurface = loadBMP("debug_atlas.bmp")
+sdlCheck debugAtlasSurface != nil, "Failed to load debug atlas image!"
+var convertedDebugAtlasSurface = convertSurfaceFormat(debugAtlasSurface, SDL_PIXELFORMAT_RGB24, 0)
+sdlCheck convertedDebugAtlasSurface != nil, "Failed to convert debug atlas image!"
+check convertedDebugAtlasSurface.format.format == SDL_PIXELFORMAT_RGB24, "Debug atlas is in the wrong format after conversion!"
+
+let vkTextureCreateInfo = VkImageCreateInfo(
+    sType: VkStructureType.imageCreateInfo
+    , imageType: VkImageType.twoDee
+    , format: VkFormat.r32g32b32SFloat
+    , extent: VkExtent3D(width: uint32 debugAtlasSurface.w, height: uint32 debugAtlasSurface.h, depth: 1)
+    , mipLevels: 1
+    , arrayLayers: 1
+    , samples: VkSampleCountFlagBits.one
+    , tiling: VkImageTiling.linear
+    , usage: uint32 VkImageUsageFlagBits.sampled
+    , sharingMode: VkSharingMode.exclusive
+    , initialLayout: VkImageLayout.preinitialized
+)
+var vkTextureImage: VkImage
+vkCheck vkCreateImage(vkDevice, unsafeAddr vkTextureCreateInfo, nil, addr vkTextureImage)
+var vkTextureImageMemoryRequirements: VkMemoryRequirements
+vkCheck vkGetImageMemoryRequirements(vkDevice, vkTextureImage, addr vkTextureImageMemoryRequirements)
+var vkTextureImageMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkTextureImageMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+vkCheck vkBindImageMemory(vkDevice, vkTextureImage, vkTextureImageMemory, 0)
+
+type
+    VulkanTexturePixel {.packed.} = object
+        r, g, b: float32
+    SdlSurfacePixel {.packed.} = object
+        r, g, b: uint8
+var vkTextureMappedMemory: ptr UncheckedArray[VulkanTexturePixel]
+vkCheck vkMapMemory(vkDevice, vkTextureImageMemory, 0, high uint64, 0, cast[ptr pointer](addr vkTextureMappedMemory))
+var sdlSurfacePixels = cast[ptr UncheckedArray[SdlSurfacePixel]](convertedDebugAtlasSurface.pixels)
+for i in 0..<(convertedDebugAtlasSurface.w * convertedDebugAtlasSurface.h):
+    let p = sdlSurfacePixels[i]
+    vkTextureMappedMemory[i] = VulkanTexturePixel(
+        r: float32(p.r) / 256.0'f32
+        , g: float32(p.g) / 256.0'f32
+        , b: float32(p.b) / 256.0'f32
+    )
+
+let vkTextureImageMemoryRange = VkMappedMemoryRange(
+    sType: VkStructureType.mappedMemoryRange
+    , memory: vkTextureImageMemory
+    , offset: 0
+    , size: high uint64
+)
+vkCheck vkFlushMappedMemoryRanges(vkDevice, 1, unsafeAddr vkTextureImageMemoryRange)
+vkCheck vkUnmapMemory(vkDevice, vkTextureImageMemory)
+
+freeSurface(convertedDebugAtlasSurface)
+freeSurface(debugAtlasSurface)
+
+vkwTransitionImageLayout(
+    device = vkDevice
+    , image = vkTextureImage
+    , commandBuffer = vkSetupCmdBuffer
+    , queue = vkQueue
+    , fence = vkSubmitFence
+    , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
+    , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
+    , oldLayout = VkImageLayout.preinitialized
+    , newLayout = VkImageLayout.shaderReadOnlyOptimal
+    , srcStageMask = uint32 VkPipelineStageFlagBits.host
+    , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
+    , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
+)
+
+let vkTextureImageViewCreateInfo = VkImageViewCreateInfo(
+    sType: VkStructureType.imageViewCreateInfo
+    , image: vkTextureImage
+    , viewType: VkImageViewType.twoDee
+    , format: VkFormat.r32g32b32SFloat
+    , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
+    , subresourceRange: VkImageSubresourceRange(
+        aspectMask: uint32 VkImageAspectFlagBits.color
+        , baseMipLevel: 0
+        , levelCount: 1
+        , baseArrayLayer: 0
+        , layerCount: 1
+    )
+)
+var vkTextureImageView: VkImageView
+vkCheck vkCreateImageView(vkDevice, unsafeAddr vkTextureImageViewCreateInfo, nil, addr vkTextureImageView)
+
+let vkSamplerCreateInfo = VkSamplerCreateInfo(
+    sType: VkStructureType.samplerCreateInfo
+    , magFilter: VkFilter.linear
+    , minFilter: VkFilter.linear
+    , mipmapMode: VkSamplerMipmapMode.linear
+    , addressModeU: VkSamplerAddressMode.clampToEdge
+    , addressModeV: VkSamplerAddressMode.clampToEdge
+    , addressModeW: VkSamplerAddressMode.clampToEdge
+    , mipLodBias: 0
+    , anisotropyEnable: vkFalse
+    , minLod: 0
+    , maxLod: 5
+    , borderColor: VkBorderColor.floatTransparentBlack
+    , unnormalizedCoordinates: vkFalse
+)
+var vkSampler: VkSampler
+vkCheck vkCreateSampler(vkDevice, unsafeAddr vkSamplerCreateInfo, nil, addr vkSampler)
+
 type
     ShaderUniform = object
         buffer: VkBuffer
@@ -567,30 +637,45 @@ vkUniforms.memory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.m
 vkCheck vkBindBufferMemory(vkDevice, vkUniforms.buffer, vkUniforms.memory, 0)
 
 let
-    vkBindings = VkDescriptorSetLayoutBinding(
-        binding: 0
-        , descriptorType: VkDescriptorType.uniformBuffer
-        , descriptorCount: 1
-        , stageFlags: uint32 VkShaderStageFlagBits.vertex
-        , pImmutableSamplers: nil
-    )
+    vkBindings = @[
+        VkDescriptorSetLayoutBinding(
+            binding: 0
+            , descriptorType: VkDescriptorType.uniformBuffer
+            , descriptorCount: 1
+            , stageFlags: uint32 VkShaderStageFlagBits.vertex
+            , pImmutableSamplers: nil
+        )
+        , VkDescriptorSetLayoutBinding(
+            binding: 1
+            , descriptorType: VkDescriptorType.combinedImageSampler
+            , descriptorCount: 1
+            , stageFlags: uint32 VkShaderStageFlagBits.fragment
+            , pImmutableSamplers: nil
+        )
+    ]
     vkSetLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo(
         sType: VkStructureType.descriptorSetLayoutCreateInfo
-        , bindingCount: 1
-        , pBindings: unsafeAddr vkBindings
+        , bindingCount: uint32 vkBindings.len()
+        , pBindings: unsafeAddr vkBindings[0]
     )
 var vkSetLayout: VkDescriptorSetLayout
 vkCheck vkCreateDescriptorSetLayout(vkDevice, unsafeAddr vkSetLayoutCreateInfo, nil, addr vkSetLayout)
 let
-    vkUniformBufferPoolSize = VkDescriptorPoolSize(
-        descriptorType: VkDescriptorType.uniformBuffer
-        , descriptorCount: 1
-    )
+    vkUniformBufferPoolSizes = @[
+        VkDescriptorPoolSize(
+            descriptorType: VkDescriptorType.uniformBuffer
+            , descriptorCount: 1
+        )
+        , VkDescriptorPoolSize(
+            descriptorType: VkDescriptorType.combinedImageSampler
+            , descriptorCount: 1
+        )
+    ]
     vkPoolCreateInfo = VkDescriptorPoolCreateInfo(
         sType: VkStructureType.descriptorPoolCreateInfo
         , maxSets: 1
-        , poolSizeCount: 1
-        , pPoolSizes: unsafeAddr vkUniformBufferPoolSize
+        , poolSizeCount: uint32 vkUniformBufferPoolSizes.len()
+        , pPoolSizes: unsafeAddr vkUniformBufferPoolSizes[0]
     )
 var vkDescriptorPool: VkDescriptorPool
 vkCheck vkCreateDescriptorPool(vkDevice, unsafeAddr vkPoolCreateInfo, nil, addr vkDescriptorPool)
@@ -622,6 +707,25 @@ let
         , pTexelBufferView: nil
     )
 vkCheck vkUpdateDescriptorSets(vkDevice, 1, unsafeAddr vkWriteDescriptor, 0, nil)
+
+let
+    vkDescriptorImageInfo = VkDescriptorImageInfo(
+        sampler: vkSampler
+        , imageView: vkTextureImageView
+        , imageLayout: VkImageLayout.shaderReadOnlyOptimal
+    )
+    vkImageWriteDescriptor = VkWriteDescriptorSet(
+        sType: VkStructureType.writeDescriptorSet
+        , dstSet: vkDescriptorSet
+        , dstBinding: 1
+        , dstArrayElement: 0
+        , descriptorCount: 1
+        , descriptorType: VkDescriptorType.combinedImageSampler
+        , pImageInfo: unsafeAddr vkDescriptorImageInfo
+        , pBufferInfo: nil
+        , pTexelBufferView: nil
+    )
+vkCheck vkUpdateDescriptorSets(vkDevice, 1, unsafeAddr vkImageWriteDescriptor, 0, nil)
 
 let vkPipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
     sType: VkStructureType.pipelineLayoutCreateInfo
@@ -790,7 +894,7 @@ vkCheck vkCreateGraphicsPipelines(vkDevice, vkNullHandle, 1, unsafeAddr vkPipeli
 let render = proc(cameraPosition: Vec3f) =
     block CameraSetup:
         var
-            unitPixelScale = 64'f32
+            unitPixelScale = 512'f32
             model = mat4(1.0'f32).scale(unitPixelScale, unitPixelScale, 1.0'f32)
             view = lookAt(
                 eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
@@ -897,7 +1001,7 @@ let render = proc(cameraPosition: Vec3f) =
 
     var offsets: VkDeviceSize
     vkCheck vkCmdBindVertexBuffers(vkRenderCmdBuffer, 0, 1, addr vkVertexInputBuffer, addr offsets)
-    vkCheck vkCmdDraw(vkRenderCmdBuffer, 3, 1, 0, 0)
+    vkCheck vkCmdDraw(vkRenderCmdBuffer, 6, 1, 0, 0)
 
     vkCheck vkCmdEndRenderPass(vkRenderCmdBuffer)
 
@@ -975,6 +1079,10 @@ block GameLoop:
 
         render(cameraPosition)
 
+vkDestroySampler(vkDevice, vkSampler, nil)
+vkDestroyImageView(vkDevice, vkTextureImageView, nil)
+vkDestroyImage(vkDevice, vkTextureImage, nil)
+vkFreeMemory(vkDevice, vkTextureImageMemory, nil)
 vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
 vkDestroyDescriptorPool(vkDevice, vkDescriptorPool, nil)

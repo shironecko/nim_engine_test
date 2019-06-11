@@ -145,6 +145,8 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkUpdateDescriptorSets
     vkCmdBindDescriptorSets
     vkFlushMappedMemoryRanges
+    vkCreateSampler
+    vkDestroySampler
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym
@@ -347,3 +349,66 @@ proc vkwPresentEnd*(device: VkDevice, swapchain: var VkSwapchainKHR, commandBuff
         , renderingCompleteSemaphore: vkNullHandle
         , imageIndex: high uint32
     )
+
+proc vkwTransitionImageLayout*(
+        device: VkDevice
+        , image: VkImage
+        , commandBuffer: var VkCommandBuffer
+        , queue: VkQueue
+        , fence: var VkFence
+        , srcAccessMask, dstAccessMask: VkAccessFlags
+        , oldLayout, newLayout: VkImageLayout
+        , srcStageMask, dstStageMask: VkPipelineStageFlags
+        , subresourceRangeAspectMask: VkImageAspectFlags
+    ) =
+
+    let beginInfo = VkCommandBufferBeginInfo(
+        sType: VkStructureType.commandBufferBeginInfo
+        , flags: uint32 VkCommandBufferUsageFlagBits.oneTimeSubmit
+    )
+    vkCheck vkBeginCommandBuffer(commandBuffer, unsafeAddr beginInfo)
+    let layoutTransitionBarrier = VkImageMemoryBarrier(
+        sType: VkStructureType.imageMemoryBarrier
+        , srcAccessMask: srcAccessMask
+        , dstAccessMask: dstAccessMask
+        , oldLayout: oldLayout
+        , newLayout: newLayout
+        , srcQueueFamilyIndex: high uint32
+        , dstQueueFamilyIndex: high uint32
+        , image: image
+        , subresourceRange: VkImageSubresourceRange(
+            aspectMask: subresourceRangeAspectMask
+            , baseMipLevel: 0
+            , levelCount: 1
+            , baseArrayLayer: 0
+            , layerCount: 1
+        )
+    )
+    vkCheck vkCmdPipelineBarrier(
+        commandBuffer
+        , srcStageMask
+        , dstStageMask
+        , 0
+        , 0, nil
+        , 0, nil
+        , 1, unsafeAddr layoutTransitionBarrier
+    )
+    vkCheck vkEndCommandBuffer(commandBuffer)
+
+    let
+        waitStageMask: VkPipelineStageFlags = uint32 VkPipelineStageFlagBits.colorAttachmentOutput
+        submitInfo = VkSubmitInfo(
+            sType: VkStructureType.submitInfo
+            , waitSemaphoreCount: 0
+            , pWaitSemaphores: nil
+            , pWaitDstStageMask: unsafeAddr waitStageMask
+            , commandBufferCount: 1
+            , pCommandBuffers: addr commandBuffer
+            , signalSemaphoreCount: 0
+            , pSignalSemaphores: nil
+        )
+    vkCheck vkQueueSubmit(queue, 1, unsafeAddr submitInfo, fence)
+
+    vkCheck vkWaitForFences(device, 1, addr fence, vkTrue, high uint64)
+    vkCheck vkResetFences(device, 1, addr fence)
+    vkCheck vkResetCommandBuffer(commandBuffer, 0)
