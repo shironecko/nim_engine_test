@@ -144,6 +144,7 @@ generateVulkanAPILoader "loadVulkanInstanceAPI":
     vkFreeDescriptorSets
     vkUpdateDescriptorSets
     vkCmdBindDescriptorSets
+    vkFlushMappedMemoryRanges
 
 macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, arrayElemType: typed): untyped =
     fnToWrap.expectKind nnkSym

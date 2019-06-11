@@ -516,9 +516,9 @@ var vkVertexBufferMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalD
 
 var vkVertexMappedMem: CArray[Vertex]
 vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
-vkVertexMappedMem[0] = Vertex(x: -0.9, y: -0.9, z: 0, w: 1.0)
-vkVertexMappedMem[1] = Vertex(x:  0.9, y: -0.9, z: 0, w: 1.0)
-vkVertexMappedMem[2] = Vertex(x:  0.0, y:  0.9, z: 0, w: 1.0)
+vkVertexMappedMem[0] = Vertex(x: -0.5, y: -0.5, z: 0, w: 1.0)
+vkVertexMappedMem[1] = Vertex(x:  0.5, y: -0.5, z: 0, w: 1.0)
+vkVertexMappedMem[2] = Vertex(x: -0.5, y:  0.5, z: 0, w: 1.0)
 vkCheck vkUnmapMemory(vkDevice, vkVertexBufferMemory)
 vkCheck vkBindBufferMemory(vkDevice, vkVertexInputBuffer, vkVertexBufferMemory, 0)
 
@@ -546,15 +546,6 @@ type
         memory: VkDeviceMemory
 var vkUniforms: ShaderUniform
 
-var
-    vkModel = mat4(1.0'f32)
-    vkView = lookAt(
-        eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
-        , center = vec3(0.0'f32)
-        , up = vec3(0.0'f32, -1.0'f32, 0.0'f32)
-    )
-    vkProjection = ortho(-10.0'f32, 10.0'f32, 10.0'f32, -10.0'f32, 0.0'f32, 100.0'f32)
-    vkMVPMatrix = vkProjection * vkView * vkModel
 let vkBufferCreateInfo = VkBufferCreateInfo(
         sType: VkStructureType.bufferCreateInfo
         , size: sizeof(float32) * 16
@@ -567,11 +558,6 @@ var vkBufferMemoryRequirements: VkMemoryRequirements
 vkCheck vkGetBufferMemoryRequirements(vkDevice, vkUniforms.buffer, addr vkBufferMemoryRequirements)
 vkUniforms.memory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
 vkCheck vkBindBufferMemory(vkDevice, vkUniforms.buffer, vkUniforms.memory, 0)
-
-var vkMatrixMappedMem: pointer
-vkCheck vkMapMemory(vkDevice, vkUniforms.memory, 0, high uint64, 0, addr vkMatrixMappedMem)
-copyMem(vkMatrixMappedMem, vkMVPMatrix.caddr, sizeof(float32) * 16)
-vkCheck vkUnmapMemory(vkDevice, vkUniforms.memory)
 
 let
     vkBindings = VkDescriptorSetLayoutBinding(
@@ -681,7 +667,7 @@ let
         , topology: VkPrimitiveTopology.triangleList
         , primitiveRestartEnable: vkFalse
     )
-    vkViewport = VkViewport(
+    viewport = VkViewport(
         x: 0, y: 0
         , width: float32 surfaceResolution.width, height: float32 surfaceResolution.height
         , minDepth: 0, maxDepth: 1
@@ -690,10 +676,10 @@ let
         offset: VkOffset2D(x: 0, y: 0)
         , extent: VkExtent2D(width: surfaceResolution.width, height: surfaceResolution.height)
     )
-    vkViewportStateCreateInfo = VkPipelineViewportStateCreateInfo(
+    viewportStateCreateInfo = VkPipelineViewportStateCreateInfo(
         sType: VkStructureType.pipelineViewportStateCreateInfo
         , viewportCount: 1
-        , pViewports: unsafeAddr vkViewport
+        , pViewports: unsafeAddr viewport
         , scissorCount: 1
         , pScissors: unsafeAddr vkScisors
     )
@@ -771,7 +757,7 @@ let
         , pVertexInputState: unsafeAddr vkPipelineVertexInputStateCreateInfo
         , pInputAssemblyState: unsafeAddr vkPipelineInputAssemblyStateCreateInfo
         , pTessellationState: nil
-        , pViewportState: unsafeAddr vkViewportStateCreateInfo
+        , pViewportState: unsafeAddr viewportStateCreateInfo
         , pRasterizationState: unsafeAddr vkPipelineRasterizationStateCreateInfo
         , pMultisampleState: unsafeAddr vkPipelineMultisampleStateCreateInfo
         , pDepthStencilState: unsafeAddr vkDepthState
@@ -786,8 +772,56 @@ let
 var vkPipeline: VkPipeline
 vkCheck vkCreateGraphicsPipelines(vkDevice, vkNullHandle, 1, unsafeAddr vkPipelineCreateInfo, nil, addr vkPipeline)
 
-let render = proc() =
+let render = proc(cameraPosition: Vec3f) =
+    block CameraSetup:
+        var
+            unitPixelScale = 64'f32
+            model = mat4(1.0'f32).scale(unitPixelScale, unitPixelScale, 1.0'f32)
+            view = lookAt(
+                eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
+                , center = vec3(0.0'f32)
+                , up = vec3(0.0'f32, -1.0'f32, 0.0'f32)
+            ).translate(-cameraPosition)
+            projection = ortho(
+                float32(surfaceResolution.width) * -0.5'f32
+                , float32(surfaceResolution.width) * 0.5'f32
+                , float32(surfaceResolution.height) * -0.5'f32
+                , float32(surfaceResolution.height) * 0.5'f32
+                , 0.0'f32, 1.0'f32)
+            clip = mat4(
+                vec4(1.0'f32, 0.0'f32, 0.0'f32, 0.0'f32),
+                vec4(0.0'f32,-1.0'f32, 0.0'f32, 0.0'f32),
+                vec4(0.0'f32, 0.0'f32, 0.5'f32, 0.0'f32),
+                vec4(0.0'f32, 0.0'f32, 0.5'f32, 1.0'f32),
+            )
+            mvp = (clip * projection * view * model).transpose()
+            mvpMappedMem: pointer
+        vkCheck vkMapMemory(vkDevice, vkUniforms.memory, 0, high uint64, 0, addr mvpMappedMem)
+        copyMem(mvpMappedMem, mvp.caddr, sizeof(float32) * 16)
+        let memoryRange = VkMappedMemoryRange(
+            sType: VkStructureType.mappedMemoryRange
+            , memory: vkUniforms.memory
+            , offset: 0
+            , size: high uint64
+        )
+        vkCheck vkFlushMappedMemoryRanges(vkDevice, 1, unsafeAddr memoryRange)
+        vkCheck vkUnmapMemory(vkDevice, vkUniforms.memory)
+
     var presentBeginData = vkwPresentBegin(vkDevice, vkSwapchain, vkRenderCmdBuffer)
+    
+    let uniformMemoryBarrier = VkMemoryBarrier(
+        sType: VkStructureType.memoryBarrier
+        , srcAccessMask: uint32 VkAccessFlagBits.hostWrite
+        , dstAccessMask: uint32 VkAccessFlagBits.uniformRead
+    )
+    vkCheck vkCmdPipelineBarrier(
+        vkRenderCmdBuffer
+        , uint32 VkPipelineStageFlagBits.host
+        , uint32 VkPipelineStageFlagBits.vertexShader
+        , 0
+        , 1, unsafeAddr uniformMemoryBarrier
+        , 0, nil
+        , 0, nil)
 
     let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
         sType: VkStructureType.imageMemoryBarrier
@@ -887,20 +921,44 @@ proc updateRenderResolution(winDim : WindowDimentions) =
 
 updateRenderResolution(windowDimentions)
 
-var evt: sdl2.Event
+var
+    evt: sdl2.Event
+    cameraPosition = vec3(0.0'f32)
+    lastPC = getPerformanceCounter()
 block GameLoop:
     while true:
         while sdl2.pollEvent(evt) == True32:
-            if evt.kind == sdl2.QuitEvent:
-                break GameLoop
-            elif evt.kind == sdl2.WindowEvent:
-                var windowEvent = cast[WindowEventObj](addr evt)
-                let newWindowDimensions = getWindowDimentions(window)
-                if windowDimentions != newWindowDimensions:
-                    updateRenderResolution(newWindowDimensions)
-                    windowDimentions = newWindowDimensions
-    
-        render()
+            case evt.kind:
+                of QuitEvent:
+                    break GameLoop
+                of WindowEvent:
+                    var windowEvent = cast[WindowEventObj](addr evt)
+                    let newWindowDimensions = getWindowDimentions(window)
+                    if windowDimentions != newWindowDimensions:
+                        updateRenderResolution(newWindowDimensions)
+                        windowDimentions = newWindowDimensions
+                else: discard
+        
+        let 
+            keys = getKeyboardState(nil)
+            cameraSpeed = 100.0'f32
+            pc = getPerformanceCounter()
+            dt = float32(float64(pc - lastPC) / float64(getPerformanceFrequency()))
+        lastPC = pc
+
+        if keys[int SDL_SCANCODE_ESCAPE] == 1:
+            break GameLoop
+
+        if keys[int SDL_SCANCODE_A] == 1:
+            cameraPosition.x -= cameraSpeed * dt
+        if keys[int SDL_SCANCODE_D] == 1:
+            cameraPosition.x += cameraSpeed * dt
+        if keys[int SDL_SCANCODE_W] == 1:
+            cameraPosition.y -= cameraSpeed * dt
+        if keys[int SDL_SCANCODE_S] == 1:
+            cameraPosition.y += cameraSpeed * dt
+
+        render(cameraPosition)
 
 vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
