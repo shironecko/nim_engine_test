@@ -562,11 +562,13 @@ vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkBufferCreateInfo, nil, addr vkUnif
 
 var vkBufferMemoryRequirements: VkMemoryRequirements
 vkCheck vkGetBufferMemoryRequirements(vkDevice, vkUniforms.buffer, addr vkBufferMemoryRequirements)
-let vkMatrixAllocateInfo = VkMemoryAllocateInfo(
-    sType: VkStructureType.memoryAllocateInfo
-    , allocationSize: vkBufferMemoryRequirements.size
-)
-# TODO: actually allocate stuff
+vkUniforms.memory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+vkCheck vkBindBufferMemory(vkDevice, vkUniforms.buffer, vkUniforms.memory, 0)
+
+var vkMatrixMappedMem: pointer
+vkCheck vkMapMemory(vkDevice, vkUniforms.memory, 0, high uint64, 0, addr vkMatrixMappedMem)
+copyMem(vkMatrixMappedMem, unsafeAddr vkIdentityMatrix[0], sizeof(float32) * 16)
+vkCheck vkUnmapMemory(vkDevice, vkUniforms.memory)
 
 let vkPipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
     sType: VkStructureType.pipelineLayoutCreateInfo
@@ -842,6 +844,7 @@ block GameLoop:
 vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
 vkDestroyBuffer(vkDevice, vkUniforms.buffer, nil)
+vkFreeMemory(vkDevice, vkUniforms.memory, nil)
 vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
 vkDestroyShaderModule(vkDevice, vkVertexShaderModule, nil)
 vkDestroyBuffer(vkDevice, vkVertexInputBuffer, nil)
