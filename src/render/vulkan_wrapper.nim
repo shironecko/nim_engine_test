@@ -6,7 +6,8 @@ import macros
 import sdl2 except VkInstance, VkSurfaceKHR
 import ../log
 import ../utility
-import vulkan as vk
+import vulkan
+export vulkan
 
 type
     VulkanVersionInfo* = object
@@ -22,7 +23,7 @@ proc `$`*(vkVersion: VulkanVersionInfo): string = &"{vkVersion.major}.{vkVersion
 
 proc getVulkanProcAddrGetterProc(): PFN_vkGetInstanceProcAddr {.inline.} = cast[PFN_vkGetInstanceProcAddr](vulkanGetVkGetInstanceProcAddr())
 
-proc loadVulkanProc[ProcType](procGetter: PFN_vkGetInstanceProcAddr, vulkanInstance: vk.VkInstance, fnName: string): ProcType {.inline.} =
+proc loadVulkanProc[ProcType](procGetter: PFN_vkGetInstanceProcAddr, vulkanInstance: VkInstance, fnName: string): ProcType {.inline.} =
     let getterProc = procGetter(vulkanInstance, fnName)
     result = cast[ProcType](getterProc)
     vkCheck result != nil, &"Failed to load {fnName} function!"
@@ -176,8 +177,6 @@ macro generateVulkanArrayGetterWrapper(fnToWrap: typed, wrapperFnName: untyped, 
             seq[`arrayElemType`]
         fnArgs = additionalArgs.foldl(a & newIdentDefs(b[0], b[1][0]), @[returnType])
         wrappedFnDryCall = additionalArgs.foldl(a.add(b[0]), newNimNode(nnkCall).add(fnToWrap)).add(elementCountAddrCommand).add(newNilLit())
-        additionalArgsIdents = additionalArgs.mapIt(it[0])
-        additionalArgsDefs = additionalArgs.mapIt(newIdentDefs(it[0], it[1][0]))
     
     var wrappedFnCall = copyNimTree(wrappedFnDryCall)
     wrappedFnCall[^1] = quote do:

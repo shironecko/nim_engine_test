@@ -5,6 +5,9 @@ import log
 template high*[T: uint64](_: typedesc[T]): uint64 = 0xFFFFFFFF_FFFFFFFF'u64
 template low*[T: uint64](_: typedesc[T]): uint64 = 0'u64
 
+template convert*[A, B](a: A): B =
+    {.fatal: &"Convertions is not defined for types: {A}, {B}!".}
+
 type
     CArray*[T] = ptr UncheckedArray[T]
 

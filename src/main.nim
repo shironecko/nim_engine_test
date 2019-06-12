@@ -7,14 +7,13 @@ import log
 import sdl2
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
 import render/vulkan_wrapper
+import render/render_vk
 import utility
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
 sdlCheck sdl2.init(INIT_EVERYTHING), "Failed to init :c"
-sdlCheck vulkanLoadLibrary(nil)
-loadVulkanAPI()
 
 const
     prefferedWidth = 512
@@ -26,7 +25,8 @@ window = createWindow(
     , SDL_WINDOWPOS_UNDEFINED
     , SDL_WINDOWPOS_UNDEFINED
     , prefferedWidth, prefferedHeight
-    , SDL_WINDOW_VULKAN or SDL_WINDOW_SHOWN)
+    , uint32 maskCombine(SDL_WINDOW_SHOWN, rdGetRequiredSDLWindowFlags())
+)
 sdlCheck window != nil, "Failed to create window!"
 
 type
@@ -39,137 +39,25 @@ proc getWindowDimentions(window : WindowPtr) : WindowDimentions =
 
 var windowDimentions = getWindowDimentions(window)
 
-let vkVersionInfo = makeVulkanVersionInfo vkApiVersion10
-vkLog LInfo, &"Vulkan API Version: {vkVersionInfo}"
-vkLog LInfo, &"Vulkan Header Version: {vkHeaderVersion}"
+var renderContext = rdPreInitialize(window)
 
-let 
-    vkAvailableLayers = vkEnumerateInstanceLayerProperties()
-    vkAvailableLayerNames = vkAvailableLayers.mapIt charArrayToString(it.layerName)
-    vkDesiredLayerNames = @["VK_LAYER_LUNARG_standard_validation"]
-    vkLayerNamesToRequest = vkAvailableLayerNames.intersect vkDesiredLayerNames
-vkLog LTrace, "[Layers]"
-for layer in vkAvailableLayers:
-    let layerName = charArrayToString layer.layerName
-    vkLog LTrace, &"\t{layerName} ({makeVulkanVersionInfo layer.specVersion}, {layer.implementationVersion})"
-    vkLog LTrace, &"\t{charArrayToString layer.description}"
-    vkLog LTrace, ""
+let renderDevices = rdGetCompatiblePhysicalDevices(renderContext)
+check renderDevices.len() != 0, "Failed to find any render compatible devices!"
 
-let vkNotFoundLayerNames = vkDesiredLayerNames.filterIt(not vkLayerNamesToRequest.contains(it))
-if vkNotFoundLayerNames.len() != 0: vkLog LWarning, &"Requested layers not found: {vkNotFoundLayerNames}"
-vkLog LInfo, &"Requesting layers: {vkLayerNamesToRequest}"
-
-var 
-    sdlVkExtensionCount: cuint
-    sdlVkExtensionsCStrings: seq[cstring]
-sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, nil)
-sdlVkExtensionsCStrings.setLen(sdlVkExtensionCount)
-sdlCheck vulkanGetInstanceExtensions(window, addr sdlVkExtensionCount, cast[cstringArray](addr sdlVkExtensionsCStrings[0]))
-let sdlVkDesiredExtensions = sdlVkExtensionsCStrings.mapIt($it)
-sdlLog LInfo, &"SDL VK required extensions: {sdlVkDesiredExtensions}"
-
-# TODO: move to debug utils
-let 
-    vkDesiredExtensionNames = @["VK_EXT_debug_report"] & sdlVkDesiredExtensions
-    vkAvailableExtensions = vkEnumerateInstanceExtensionProperties(nil)
-    vkAvailableExtensionNames = vkAvailableExtensions.mapIt charArrayToString(it.extensionName)
-    vkExtensionNamesToRequest = vkAvailableExtensionNames.intersect vkDesiredExtensionNames
-vkLog LTrace, "[Extensions]"
-for extension in vkAvailableExtensions:
-    let extensionName = charArrayToString(extension.extensionName)
-    vkLog LTrace, &"\t{extensionName} {makeVulkanVersionInfo extension.specVersion}"
-
-let vkNotFoundExtensions = vkDesiredExtensionNames.filterIt(not vkExtensionNamesToRequest.contains(it))
-if vkNotFoundExtensions.len() != 0: vkLog LWarning, &"Requested extensions not found: {vkNotFoundExtensions}"
-vkLog LInfo, &"Requesting extensions: {vkExtensionNamesToRequest}"
-
-var vkInstance: vk.VkInstance
-let vkLayersCStrings = allocCStringArray(vkLayerNamesToRequest)
-block CreateVulkanInstance:
-    let vkExtensionsCStrings = allocCStringArray(vkExtensionNamesToRequest)
-    # TODO: deallocate cstring arrays? Or who cares?
-    #defer: deallocCStringArray(vkExtensionsCStrings)
-    
-    let 
-        appInfo = VkApplicationInfo(
-            sType: VkStructureType.applicationInfo
-            , pNext: nil
-            , pApplicationName: "Nim Vulkan"
-            , applicationVersion: 1
-            , pEngineName: "Dunno"
-            , engineVersion: 1
-            , apiVersion: vkVersion10)
-        instanceCreateInfo = VkInstanceCreateInfo(
-            sType: VkStructureType.instanceCreateInfo
-            , pNext: nil
-            , flags: 0
-            , pApplicationInfo: unsafeAddr appInfo
-            , enabledLayerCount: uint32 vkLayerNamesToRequest.len()
-            , ppEnabledLayerNames: vkLayersCStrings
-            , enabledExtensionCount: uint32 vkExtensionNamesToRequest.len()
-            , ppEnabledExtensionNames: vkExtensionsCStrings)
-    vkCheck vkCreateInstance(unsafeAddr instanceCreateInfo, nil, addr vkInstance)
-
-loadVulkanInstanceAPI(vkInstance)
-
-type
-    VulkanDebugVerbosity {.pure.} = enum
-        Light, Full
-const
-    vkDebugVerbosity = VulkanDebugVerbosity.Light
-    vkDebugMask = case vkDebugVerbosity:
-        of Light: maskCombine(VkDebugReportFlagBitsEXT.error, VkDebugReportFlagBitsEXT.warning, VkDebugReportFlagBitsEXT.performanceWarning)
-        of Full: maskCombine(VkDebugReportFlagBitsEXT.error, VkDebugReportFlagBitsEXT.warning, VkDebugReportFlagBitsEXT.performanceWarning, VkDebugReportFlagBitsEXT.information, VkDebugReportFlagBitsEXT.debug)
-
-var vkDebugCallback: VkDebugReportCallbackEXT
-block SetupVulkanDebugCallback:
-    let vkDebugReportCallback : PFN_vkDebugReportCallbackEXT = proc (flags: VkDebugReportFlagsEXT; objectType: VkDebugReportObjectTypeEXT; cbObject: uint64; location: csize; messageCode:  int32; pLayerPrefix: cstring; pMessage: cstring; pUserData: pointer): VkBool32 {.cdecl.} =
-        var logLevel = LTrace
-        if   maskCheck(flags, VkDebugReportFlagBitsEXT.error):              logLevel = LError
-        elif maskCheck(flags, VkDebugReportFlagBitsEXT.warning):            logLevel = LWarning
-        elif maskCheck(flags, VkDebugReportFlagBitsEXT.performanceWarning): logLevel = LWarning
-        elif maskCheck(flags, VkDebugReportFlagBitsEXT.information):        logLevel = LInfo
-        elif maskCheck(flags, VkDebugReportFlagBitsEXT.debug):              logLevel = LTrace
-        vkLog logLevel, &"{pLayerPrefix} {objectType} {messageCode} {pMessage}"
-        vkFalse
-
-    let 
-        vkCallbackCreateInfo = VkDebugReportCallbackCreateInfoEXT(
-            sType: VkStructureType.debugReportCallbackCreateInfoExt
-            , flags: uint32 vkDebugMask
-            , pfnCallback: vkDebugReportCallback)
-    vkCheck vkCreateDebugReportCallbackEXT(vkInstance, unsafeAddr vkCallbackCreateInfo, nil, addr vkDebugCallback)
-
-var vkSurface: vk.VkSurfaceKHR
-sdlCheck vulkanCreateSurface(window, cast[VulkanInstance](vkInstance), cast[ptr VulkanSurface](addr vkSurface))
-
-let vkDevices = vkwEnumeratePhysicalDevicesWithDescriptions(vkInstance, vkSurface)
-vkCheck vkDevices.len() != 0, "Failed to find any Vulkan compatible devices!"
-
-vkLog LTrace, "[Devices]"
-for d in vkDevices:
-    vkLog LTrace, &"\t{d.name}"
-    vkLog LTrace, &"\t\tType {d.properties.deviceType} API {makeVulkanVersionInfo d.properties.apiVersion} Driver {d.properties.driverVersion} Vendor {d.vendor}"
-
-let vkCompatibleDevices = vkDevices.filter((d) => d.hasPresentQueue)
-vkCheck vkCompatibleDevices.len != 0, "No devices with a present queue found!"
-
-vkLog LInfo, "[Compatible Devices]"
-for d in vkCompatibleDevices:
-    vkLog LInfo, &"\t{d.name}"
-
-let vkSelectedPhysicalDevice = vkCompatibleDevices[0]
-vkLog LInfo, &"Selected physical device: {vkSelectedPhysicalDevice.name}"
+gLog LTrace, "[Compatible Devices]"
+for d in renderDevices: gLog LTrace, &"\t{d.name}({d.deviceType}, {d.vendor})"
+let selectedRenderDevice = renderDevices[0]
+gLog LInfo, &"Selected render device: {selectedRenderDevice.name}"
 
 vkLog LTrace, "[Device Extensions]"
-for ex in vkSelectedPhysicalDevice.extensions:
+for ex in selectedRenderDevice.extensions:
     vkLog LTrace, &"\t{charArrayToString(ex.extensionName)}({makeVulkanVersionInfo(ex.specVersion)})"
 
 var
     queuePriorities = [1.0'f32]
     queueCreateInfo = VkDeviceQueueCreateInfo(
         sType: VkStructureType.deviceQueueCreateInfo
-        , queueFamilyIndex: vkSelectedPhysicalDevice.presentQueueIdx
+        , queueFamilyIndex: selectedRenderDevice.presentQueueIdx
         , queueCount: 1
         , pQueuePriorities: addr queuePriorities[0]
     )
@@ -189,10 +77,10 @@ var
         , pEnabledFeatures: addr deviceFeatures
     )
     vkDevice: VkDevice
-vkCheck vkCreateDevice(vkSelectedPhysicalDevice.handle, addr deviceInfo, nil, addr vkDevice)
+vkCheck vkCreateDevice(selectedRenderDevice.handle, addr deviceInfo, nil, addr vkDevice)
 deallocCStringArray(deviceExtensionsCStrings)
 
-let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(vkSelectedPhysicalDevice.handle, vkSurface)
+let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(selectedRenderDevice.handle, vkSurface)
 vkLog LTrace, "[Surface Formats]"
 for fmt in surfaceFormats:
     vkLog LTrace, &"\t{fmt.format}"
@@ -207,7 +95,7 @@ let colorSpace = surfaceFormats[0].colorSpace
 vkLog LInfo, &"Selected surface format: {colorFormat}, colorspace: {colorSpace}"
 
 var vkSurfaceCapabilities: VkSurfaceCapabilitiesKHR
-vkCheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vkSelectedPhysicalDevice.handle, vkSurface, addr vkSurfaceCapabilities)
+vkCheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(selectedRenderDevice.handle, vkSurface, addr vkSurfaceCapabilities)
 var desiredImageCount = 2'u32
 if desiredImageCount < vkSurfaceCapabilities.minImageCount: 
     desiredImageCount = vkSurfaceCapabilities.minImageCount
@@ -225,7 +113,7 @@ var preTransform = vkSurfaceCapabilities.currentTransform
 if maskCheck(vkSurfaceCapabilities.supportedTransforms, VkSurfaceTransformFlagBitsKHR.identity):
     preTransform = VkSurfaceTransformFlagBitsKHR.identity
 
-let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(vkSelectedPhysicalDevice.handle, vkSurface)
+let presentModes = vkGetPhysicalDeviceSurfacePresentModesKHR(selectedRenderDevice.handle, vkSurface)
 vkLog LTrace, &"Present modes: {presentModes}"
 var presentMode = VkPresentModeKHR.fifo
 for pm in presentModes:
@@ -273,16 +161,16 @@ vkCheck vkCreateImage(vkDevice, unsafeAddr vkImageCreateInfo, nil, addr vkDepthI
 
 var vkMemoryRequirements: VkMemoryRequirements
 vkCheck vkGetImageMemoryRequirements(vkDevice, vkDepthImage, addr vkMemoryRequirements)
-var vkImageMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal)
+var vkImageMemory = vkwAllocateDeviceMemory(vkDevice, selectedRenderDevice.memoryProperties, vkMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal)
 vkCheck vkBindImageMemory(vkDevice, vkDepthImage, vkImageMemory, 0)
 
 var vkQueue: VkQueue
-vkCheck vkGetDeviceQueue(vkDevice, vkSelectedPhysicalDevice.presentQueueIdx, 0, addr vkQueue)
+vkCheck vkGetDeviceQueue(vkDevice, selectedRenderDevice.presentQueueIdx, 0, addr vkQueue)
 
 let vkCommandPoolCreateInfo = VkCommandPoolCreateInfo(
     sType: VkStructureType.commandPoolCreateInfo
     , flags: uint32 VkCommandPoolCreateFlagBits.resetCommandBuffer
-    , queueFamilyIndex: vkSelectedPhysicalDevice.presentQueueIdx
+    , queueFamilyIndex: selectedRenderDevice.presentQueueIdx
 )
 var vkCommandPool: VkCommandPool
 vkCheck vkCreateCommandPool(vkDevice, unsafeAddr vkCommandPoolCreateInfo, nil, addr vkCommandPool)
@@ -474,7 +362,7 @@ vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkVertexBufferCreateInfo, nil, addr 
 
 var vkVertexBufferMemoryRequirements: VkMemoryRequirements
 vkGetBufferMemoryRequirements(vkDevice, vkVertexInputBuffer, addr vkVertexBufferMemoryRequirements)
-var vkVertexBufferMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkVertexBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+var vkVertexBufferMemory = vkwAllocateDeviceMemory(vkDevice, selectedRenderDevice.memoryProperties, vkVertexBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
 
 var vkVertexMappedMem: CArray[Vertex]
 vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
@@ -514,7 +402,7 @@ vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkVertexShaderCreateInfo, nil,
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkFragmentShaderCreateInfo, nil, addr vkFragmentShaderModule)
 
 let
-    vkTextures = vkwLoadColorTextures(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkSetupCmdBuffer, vkQueue, vkSubmitFence
+    vkTextures = vkwLoadColorTextures(vkDevice, selectedRenderDevice.memoryProperties, vkSetupCmdBuffer, vkQueue, vkSubmitFence
                                       , @["debug_atlas.bmp"])
     vkDebugAtlasTexture = vkTextures[0]
 
@@ -534,7 +422,7 @@ vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkBufferCreateInfo, nil, addr vkUnif
 
 var vkBufferMemoryRequirements: VkMemoryRequirements
 vkCheck vkGetBufferMemoryRequirements(vkDevice, vkUniforms.buffer, addr vkBufferMemoryRequirements)
-vkUniforms.memory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+vkUniforms.memory = vkwAllocateDeviceMemory(vkDevice, selectedRenderDevice.memoryProperties, vkBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
 vkCheck vkBindBufferMemory(vkDevice, vkUniforms.buffer, vkUniforms.memory, 0)
 
 let
