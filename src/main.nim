@@ -513,109 +513,10 @@ var
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkVertexShaderCreateInfo, nil, addr vkVertexShaderModule)
 vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkFragmentShaderCreateInfo, nil, addr vkFragmentShaderModule)
 
-var debugAtlasSurface = loadBMP("debug_atlas.bmp")
-sdlCheck debugAtlasSurface != nil, "Failed to load debug atlas image!"
-var convertedDebugAtlasSurface = convertSurfaceFormat(debugAtlasSurface, SDL_PIXELFORMAT_RGB24, 0)
-sdlCheck convertedDebugAtlasSurface != nil, "Failed to convert debug atlas image!"
-check convertedDebugAtlasSurface.format.format == SDL_PIXELFORMAT_RGB24, "Debug atlas is in the wrong format after conversion!"
-
-let vkTextureCreateInfo = VkImageCreateInfo(
-    sType: VkStructureType.imageCreateInfo
-    , imageType: VkImageType.twoDee
-    , format: VkFormat.r32g32b32SFloat
-    , extent: VkExtent3D(width: uint32 debugAtlasSurface.w, height: uint32 debugAtlasSurface.h, depth: 1)
-    , mipLevels: 1
-    , arrayLayers: 1
-    , samples: VkSampleCountFlagBits.one
-    , tiling: VkImageTiling.linear
-    , usage: uint32 VkImageUsageFlagBits.sampled
-    , sharingMode: VkSharingMode.exclusive
-    , initialLayout: VkImageLayout.preinitialized
-)
-var vkTextureImage: VkImage
-vkCheck vkCreateImage(vkDevice, unsafeAddr vkTextureCreateInfo, nil, addr vkTextureImage)
-var vkTextureImageMemoryRequirements: VkMemoryRequirements
-vkCheck vkGetImageMemoryRequirements(vkDevice, vkTextureImage, addr vkTextureImageMemoryRequirements)
-var vkTextureImageMemory = vkwAllocateDeviceMemory(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkTextureImageMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
-vkCheck vkBindImageMemory(vkDevice, vkTextureImage, vkTextureImageMemory, 0)
-
-type
-    VulkanTexturePixel {.packed.} = object
-        r, g, b: float32
-    SdlSurfacePixel {.packed.} = object
-        r, g, b: uint8
-var vkTextureMappedMemory: ptr UncheckedArray[VulkanTexturePixel]
-vkCheck vkMapMemory(vkDevice, vkTextureImageMemory, 0, high uint64, 0, cast[ptr pointer](addr vkTextureMappedMemory))
-var sdlSurfacePixels = cast[ptr UncheckedArray[SdlSurfacePixel]](convertedDebugAtlasSurface.pixels)
-for i in 0..<(convertedDebugAtlasSurface.w * convertedDebugAtlasSurface.h):
-    let p = sdlSurfacePixels[i]
-    vkTextureMappedMemory[i] = VulkanTexturePixel(
-        r: float32(p.r) / 256.0'f32
-        , g: float32(p.g) / 256.0'f32
-        , b: float32(p.b) / 256.0'f32
-    )
-
-let vkTextureImageMemoryRange = VkMappedMemoryRange(
-    sType: VkStructureType.mappedMemoryRange
-    , memory: vkTextureImageMemory
-    , offset: 0
-    , size: high uint64
-)
-vkCheck vkFlushMappedMemoryRanges(vkDevice, 1, unsafeAddr vkTextureImageMemoryRange)
-vkCheck vkUnmapMemory(vkDevice, vkTextureImageMemory)
-
-freeSurface(convertedDebugAtlasSurface)
-freeSurface(debugAtlasSurface)
-
-vkwTransitionImageLayout(
-    device = vkDevice
-    , image = vkTextureImage
-    , commandBuffer = vkSetupCmdBuffer
-    , queue = vkQueue
-    , fence = vkSubmitFence
-    , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
-    , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
-    , oldLayout = VkImageLayout.preinitialized
-    , newLayout = VkImageLayout.shaderReadOnlyOptimal
-    , srcStageMask = uint32 VkPipelineStageFlagBits.host
-    , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
-    , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
-)
-
-let vkTextureImageViewCreateInfo = VkImageViewCreateInfo(
-    sType: VkStructureType.imageViewCreateInfo
-    , image: vkTextureImage
-    , viewType: VkImageViewType.twoDee
-    , format: VkFormat.r32g32b32SFloat
-    , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
-    , subresourceRange: VkImageSubresourceRange(
-        aspectMask: uint32 VkImageAspectFlagBits.color
-        , baseMipLevel: 0
-        , levelCount: 1
-        , baseArrayLayer: 0
-        , layerCount: 1
-    )
-)
-var vkTextureImageView: VkImageView
-vkCheck vkCreateImageView(vkDevice, unsafeAddr vkTextureImageViewCreateInfo, nil, addr vkTextureImageView)
-
-let vkSamplerCreateInfo = VkSamplerCreateInfo(
-    sType: VkStructureType.samplerCreateInfo
-    , magFilter: VkFilter.linear
-    , minFilter: VkFilter.linear
-    , mipmapMode: VkSamplerMipmapMode.linear
-    , addressModeU: VkSamplerAddressMode.clampToEdge
-    , addressModeV: VkSamplerAddressMode.clampToEdge
-    , addressModeW: VkSamplerAddressMode.clampToEdge
-    , mipLodBias: 0
-    , anisotropyEnable: vkFalse
-    , minLod: 0
-    , maxLod: 5
-    , borderColor: VkBorderColor.floatTransparentBlack
-    , unnormalizedCoordinates: vkFalse
-)
-var vkSampler: VkSampler
-vkCheck vkCreateSampler(vkDevice, unsafeAddr vkSamplerCreateInfo, nil, addr vkSampler)
+let
+    vkTextures = vkwLoadColorTextures(vkDevice, vkSelectedPhysicalDevice.memoryProperties, vkSetupCmdBuffer, vkQueue, vkSubmitFence
+                                      , @["debug_atlas.bmp"])
+    vkDebugAtlasTexture = vkTextures[0]
 
 type
     ShaderUniform = object
@@ -710,8 +611,8 @@ vkCheck vkUpdateDescriptorSets(vkDevice, 1, unsafeAddr vkWriteDescriptor, 0, nil
 
 let
     vkDescriptorImageInfo = VkDescriptorImageInfo(
-        sampler: vkSampler
-        , imageView: vkTextureImageView
+        sampler: vkDebugAtlasTexture.sampler
+        , imageView: vkDebugAtlasTexture.view
         , imageLayout: VkImageLayout.shaderReadOnlyOptimal
     )
     vkImageWriteDescriptor = VkWriteDescriptorSet(
@@ -1079,10 +980,8 @@ block GameLoop:
 
         render(cameraPosition)
 
-vkDestroySampler(vkDevice, vkSampler, nil)
-vkDestroyImageView(vkDevice, vkTextureImageView, nil)
-vkDestroyImage(vkDevice, vkTextureImage, nil)
-vkFreeMemory(vkDevice, vkTextureImageMemory, nil)
+for texture in vkTextures:
+    vkwFreeColorTexture(vkDevice, texture)
 vkDestroyPipeline(vkDevice, vkPipeline, nil)
 vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
 vkDestroyDescriptorPool(vkDevice, vkDescriptorPool, nil)

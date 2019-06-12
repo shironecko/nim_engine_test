@@ -412,3 +412,143 @@ proc vkwTransitionImageLayout*(
     vkCheck vkWaitForFences(device, 1, addr fence, vkTrue, high uint64)
     vkCheck vkResetFences(device, 1, addr fence)
     vkCheck vkResetCommandBuffer(commandBuffer, 0)
+
+type
+    VkwColorTexture* = object
+        image*: VkImage
+        view*: VkImageView
+        sampler*: VkSampler
+        memory*: VkDeviceMemory
+
+proc vkwLoadTextureSurface(path: string, desiredPixelFormat: uint32): SurfacePtr =
+    var textureSurface = loadBMP(path)
+    sdlCheck textureSurface != nil, &"Failed to load texture surface: {path}!"
+
+    if textureSurface.format.format != desiredPixelFormat:
+        var convertedTextureSurface = convertSurfaceFormat(textureSurface, desiredPixelFormat, 0)
+        sdlCheck convertedTextureSurface != nil, &"Failed to convert texture surface at {path} to pixel format of {desiredPixelFormat}!"
+        sdlCheck convertedTextureSurface.format.format == desiredPixelFormat, &"Failed to convert texture surface at {path} to pixel format of {desiredPixelFormat}! Format after conversion: {convertedTextureSurface.format.format}."
+        freeSurface(textureSurface)
+        convertedTextureSurface
+    else:
+        textureSurface
+
+proc vkwLoadColorTextures*(
+        device: VkDevice
+        , memoryProperties: VkPhysicalDeviceMemoryProperties
+        , commandBuffer: var VkCommandBuffer
+        , queue: VkQueue
+        , fence: var VkFence
+        , texturePaths: seq[string]
+    ): seq[VkwColorTexture] =
+    for texPath in texturePaths:
+        var texture: VkwColorTexture
+
+        let desiredTextureSurfacePixelFormat = SDL_PIXELFORMAT_RGB24
+        var textureSurface = vkwLoadTextureSurface(texPath, desiredTextureSurfacePixelFormat)
+        defer: freeSurface(textureSurface)
+
+        let textureCreateInfo = VkImageCreateInfo(
+            sType: VkStructureType.imageCreateInfo
+            , imageType: VkImageType.twoDee
+            , format: VkFormat.r32g32b32a32SFloat
+            , extent: VkExtent3D(width: uint32 textureSurface.w, height: uint32 textureSurface.h, depth: 1)
+            , mipLevels: 1
+            , arrayLayers: 1
+            , samples: VkSampleCountFlagBits.one
+            , tiling: VkImageTiling.linear
+            , usage: uint32 VkImageUsageFlagBits.sampled
+            , sharingMode: VkSharingMode.exclusive
+            , initialLayout: VkImageLayout.preinitialized
+        )
+        
+        vkCheck vkCreateImage(device, unsafeAddr textureCreateInfo, nil, addr texture.image)
+        var imageMemoryRequirements: VkMemoryRequirements
+        vkCheck vkGetImageMemoryRequirements(device, texture.image, addr imageMemoryRequirements)
+        texture.memory = vkwAllocateDeviceMemory(device, memoryProperties, imageMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+        vkCheck vkBindImageMemory(device, texture.image, texture.memory, 0)
+
+        type
+            VulkanTexturePixel {.packed.} = object
+                r, g, b, a: float32
+            SdlSurfacePixel {.packed.} = object
+                r, g, b: uint8
+        var textureMappedMemory: ptr UncheckedArray[VulkanTexturePixel]
+        vkCheck vkMapMemory(device, texture.memory, 0, high uint64, 0, cast[ptr pointer](addr textureMappedMemory))
+        var sdlSurfacePixels = cast[ptr UncheckedArray[SdlSurfacePixel]](textureSurface.pixels)
+        for i in 0..<(textureSurface.w * textureSurface.h):
+            let p = sdlSurfacePixels[i]
+            textureMappedMemory[i] = VulkanTexturePixel(
+                r: float32(p.r) / 256.0'f32
+                , g: float32(p.g) / 256.0'f32
+                , b: float32(p.b) / 256.0'f32
+                , a: float32(256.0'f32) / 256.0'f32 # TODO: figure this stuff out
+            )
+
+        let textureMemoryRange = VkMappedMemoryRange(
+            sType: VkStructureType.mappedMemoryRange
+            , memory: texture.memory
+            , offset: 0
+            , size: high uint64
+        )
+        vkCheck vkFlushMappedMemoryRanges(device, 1, unsafeAddr textureMemoryRange)
+        vkCheck vkUnmapMemory(device, texture.memory)
+
+        vkwTransitionImageLayout(
+            device = device
+            , image = texture.image
+            , commandBuffer = commandBuffer
+            , queue = queue
+            , fence = fence
+            , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
+            , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
+            , oldLayout = VkImageLayout.preinitialized
+            , newLayout = VkImageLayout.shaderReadOnlyOptimal
+            , srcStageMask = uint32 VkPipelineStageFlagBits.host
+            , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
+            , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
+        )
+
+        let vkTextureImageViewCreateInfo = VkImageViewCreateInfo(
+            sType: VkStructureType.imageViewCreateInfo
+            , image: texture.image
+            , viewType: VkImageViewType.twoDee
+            , format: VkFormat.r32g32b32a32SFloat
+            , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
+            , subresourceRange: VkImageSubresourceRange(
+                aspectMask: uint32 VkImageAspectFlagBits.color
+                , baseMipLevel: 0
+                , levelCount: 1
+                , baseArrayLayer: 0
+                , layerCount: 1
+            )
+        )
+        vkCheck vkCreateImageView(device, unsafeAddr vkTextureImageViewCreateInfo, nil, addr texture.view)
+
+        let samplerCreateInfo = VkSamplerCreateInfo(
+            sType: VkStructureType.samplerCreateInfo
+            , magFilter: VkFilter.linear
+            , minFilter: VkFilter.linear
+            , mipmapMode: VkSamplerMipmapMode.linear
+            , addressModeU: VkSamplerAddressMode.clampToEdge
+            , addressModeV: VkSamplerAddressMode.clampToEdge
+            , addressModeW: VkSamplerAddressMode.clampToEdge
+            , mipLodBias: 0
+            , anisotropyEnable: vkFalse
+            , minLod: 0
+            , maxLod: 5
+            , borderColor: VkBorderColor.floatTransparentBlack
+            , unnormalizedCoordinates: vkFalse
+        )
+        vkCheck vkCreateSampler(device, unsafeAddr samplerCreateInfo, nil, addr texture.sampler)
+
+        result.add(texture)
+
+proc vkwFreeColorTexture*(
+        device: VkDevice
+        , texture: VkwColorTexture
+    ) =
+    vkCheck vkDestroySampler(device, texture.sampler, nil)
+    vkCheck vkDestroyImageView(device, texture.view, nil)
+    vkCheck vkDestroyImage(device, texture.image, nil)
+    vkCHeck vkFreeMemory(device, texture.memory, nil)
