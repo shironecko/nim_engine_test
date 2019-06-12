@@ -48,7 +48,6 @@ macro generateVulkanAPILoader(loaderName: string, usedFunctions: untyped): untyp
             fnHasCustomName = fn.kind() == nnkCall
             fnIdent = if fnHasCustomName: fn[1][0] else: fn
             fnCName = if fnHasCustomName: toStrLit(fn[0]) else: toStrLit(fnIdent)
-            fnName = toStrLit(fnIdent)
             fnType = ident(&"PFN_{fnCName}")
         
         fnDeclarations.add quote do:
@@ -413,11 +412,13 @@ proc vkwTransitionImageLayout*(
     vkCheck vkResetCommandBuffer(commandBuffer, 0)
 
 type
-    VkwColorTexture* = object
+    VkwTexture* = object
         image*: VkImage
         view*: VkImageView
-        sampler*: VkSampler
         memory*: VkDeviceMemory
+    VkwTextureWithSampler* = object
+        texture*: VkwTexture
+        sampler*: VkSampler
 
 proc vkwLoadTextureSurface(path: string, desiredPixelFormat: uint32): SurfacePtr =
     var textureSurface = loadBMP(path)
@@ -439,9 +440,9 @@ proc vkwLoadColorTextures*(
         , queue: VkQueue
         , fence: var VkFence
         , texturePaths: seq[string]
-    ): seq[VkwColorTexture] =
+    ): seq[VkwTextureWithSampler] =
     for texPath in texturePaths:
-        var texture: VkwColorTexture
+        var texture: VkwTexture
 
         let desiredTextureSurfacePixelFormat = SDL_PIXELFORMAT_RGB24
         var textureSurface = vkwLoadTextureSurface(texPath, desiredTextureSurfacePixelFormat)
@@ -539,15 +540,67 @@ proc vkwLoadColorTextures*(
             , borderColor: VkBorderColor.floatTransparentBlack
             , unnormalizedCoordinates: vkFalse
         )
-        vkCheck vkCreateSampler(device, unsafeAddr samplerCreateInfo, nil, addr texture.sampler)
+        var sampler: VkSampler
+        vkCheck vkCreateSampler(device, unsafeAddr samplerCreateInfo, nil, addr sampler)
 
-        result.add(texture)
+        result.add(VkwTextureWithSampler(texture: texture, sampler: sampler))
 
-proc vkwFreeColorTexture*(
+proc vkwFreeTexture*(
         device: VkDevice
-        , texture: VkwColorTexture
+        , texture: VkwTexture
     ) =
-    vkCheck vkDestroySampler(device, texture.sampler, nil)
     vkCheck vkDestroyImageView(device, texture.view, nil)
     vkCheck vkDestroyImage(device, texture.image, nil)
-    vkCHeck vkFreeMemory(device, texture.memory, nil)
+    vkCheck vkFreeMemory(device, texture.memory, nil)
+
+proc vkwFreeTextureWithSampler*(
+        device: VkDevice
+        , textureWithSampler: VkwTextureWithSampler
+    ) =
+    vkCheck vkDestroySampler(device, textureWithSampler.sampler, nil)
+    vkwFreeTexture(device, textureWithSampler.texture)
+
+type
+    VkwBuffer* = object
+        buffer*: VkBuffer
+        view*: VkBufferView
+        memory*: VkDeviceMemory
+
+proc vkwAllocateBuffer*(
+        device: VkDevice
+        , memoryProperties: VkPhysicalDeviceMemoryProperties
+        , size: uint64
+        , usageFlags: VkBufferUsageFlags
+    ): VkwBuffer =
+    let bufferCreateInfo = VkBufferCreateInfo(
+        sType: VkStructureType.bufferCreateInfo
+        , size: size
+        , usage: usageFlags
+        , sharingMode: VkSharingMode.exclusive
+    )
+    vkCheck vkCreateBuffer(device, unsafeAddr bufferCreateInfo, nil, addr result.buffer)
+
+    var bufferMemoryRequirements: VkMemoryRequirements
+    vkGetBufferMemoryRequirements(device, result.buffer, addr bufferMemoryRequirements)
+    result.memory = vkwAllocateDeviceMemory(device, memoryProperties, bufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+    vkCheck vkBindBufferMemory(device, result.buffer, result.memory, 0)
+
+proc vkwFreeBuffer*(
+        device: VkDevice
+        , buffer: VkwBuffer
+    ) =
+    vkCheck vkDestroyBuffer(device, buffer.buffer, nil)
+    vkCheck vkFreeMemory(device, buffer.memory, nil)
+
+proc vkwWithMemory*(device: VkDevice, memory: VkDeviceMemory, action: proc(memory: pointer)) =
+    var memoryPtr {.inject.}: pointer
+    vkCheck vkMapMemory(device, memory, 0, high uint64, 0, addr memoryPtr)
+    action(memoryPtr)
+    let memoryRange = VkMappedMemoryRange(
+        sType: VkStructureType.mappedMemoryRange
+        , memory: memory
+        , offset: 0
+        , size: high uint64
+    )
+    vkCheck vkFlushMappedMemoryRanges(device, 1, unsafeAddr memoryRange)
+    vkCheck vkUnmapMemory(device, memory)

@@ -1,5 +1,7 @@
 import sequtils
 import strformat
+import sugar
+import glm
 import sdl2
 import vulkan_wrapper
 import ../log
@@ -26,8 +28,24 @@ type
         debugCallback: VkDebugReportCallbackEXT
         surface: VkSurfaceKHR
         physicalDevice: VkPhysicalDevice
+        physicalDeviceMemoryProperties: VkPhysicalDeviceMemoryProperties
         physicalDeviceProperties: RdPhysicalDevice
         device: VkDevice
+        swapchain: VkSwapchainKHR
+        swapchainTextures: seq[VkwTexture]
+        framebuffers: seq[VkFramebuffer]
+        depthImage: VkwTexture
+        queue: VkQueue
+        commandPool: VkCommandPool
+        commandBuffer: VkCommandBuffer
+        submitFence: VkFence
+        renderPass: VkRenderPass
+        vertexBuffer: VkwBuffer
+        uniforms: VkwBuffer
+        descriptorPool: VkDescriptorPool
+        descriptorSet: VkDescriptorSet
+        pipelineLayout: VkPipelineLayout
+        pipeline: VkPipeline
 
 template convert[B: RdPhysicalDeviceType](a: VkPhysicalDeviceType): B =
     case a:
@@ -101,10 +119,10 @@ proc rdPreInitialize*(window: WindowPtr): RdContext =
 
     let
         layersCStrings = allocCStringArray(result.instanceLayers)
-        extensionsCStrings = allocCStringArray(result.instanceExtensions)
+        deviceExtensionsCStrings = allocCStringArray(result.instanceExtensions)
     defer:
         deallocCStringArray(layersCStrings)
-        deallocCStringArray(extensionsCStrings)
+        deallocCStringArray(deviceExtensionsCStrings)
     let 
         appInfo = VkApplicationInfo(
             sType: VkStructureType.applicationInfo
@@ -122,7 +140,7 @@ proc rdPreInitialize*(window: WindowPtr): RdContext =
             , enabledLayerCount: uint32 result.instanceLayers.len()
             , ppEnabledLayerNames: layersCStrings
             , enabledExtensionCount: uint32 result.instanceExtensions.len()
-            , ppEnabledExtensionNames: extensionsCStrings)
+            , ppEnabledExtensionNames: deviceExtensionsCStrings)
     vkCheck vkCreateInstance(unsafeAddr instanceCreateInfo, nil, addr result.instance)
 
     loadVulkanInstanceAPI(result.instance)
@@ -174,6 +192,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
 
     let deviceVulkanData = selectedPhysicalDevice.vulkanData
     context.physicalDeviceProperties = selectedPhysicalDevice
+    context.physicalDeviceMemoryProperties = deviceVulkanData.memoryProperties
     context.physicalDevice = deviceVulkanData.handle
 
     vkLog LTrace, "[Device Extensions]"
@@ -183,10 +202,10 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
     let
         layersCStrings = allocCStringArray(context.instanceLayers)
         deviceExtensions = ["VK_KHR_swapchain"]
-        extensionsCStrings = allocCStringArray(deviceExtensions)
+        deviceExtensionsCStrings = allocCStringArray(deviceExtensions)
     defer:
         deallocCStringArray(layersCStrings)
-        deallocCStringArray(extensionsCStrings)
+        deallocCStringArray(deviceExtensionsCStrings)
 
     let
         queuePriorities = [1.0'f32]
@@ -194,9 +213,8 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             sType: VkStructureType.deviceQueueCreateInfo
             , queueFamilyIndex: deviceVulkanData.presentQueueIdx
             , queueCount: 1
-            , pQueuePriorities: addr queuePriorities[0]
+            , pQueuePriorities: unsafeAddr queuePriorities[0]
         )
-        deviceExtensionsCStrings = allocCStringArray(deviceExtensions)
         deviceFeatures = VkPhysicalDeviceFeatures(
             shaderClipDistance: vkTrue
         )
@@ -211,7 +229,6 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , pEnabledFeatures: unsafeAddr deviceFeatures
         )
     vkCheck vkCreateDevice(deviceVulkanData.handle, unsafeAddr deviceInfo, nil, addr context.device)
-    deallocCStringArray(deviceExtensionsCStrings)
 
     let surfaceFormats = vkGetPhysicalDeviceSurfaceFormatsKHR(deviceVulkanData.handle, context.surface)
     vkLog LTrace, "[Surface Formats]"
@@ -274,7 +291,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
 
     vkCheck vkCreateSwapchainKHR(context.device, unsafeAddr swapChainCreateInfo, nil, addr context.swapchain)
 
-    let vkImageCreateInfo = VkImageCreateInfo(
+    let depthImageCreateInfo = VkImageCreateInfo(
         sType: VkStructureType.imageCreateInfo
         , imageType: VkImageType.twoDee
         , format: VkFormat.d16Unorm
@@ -289,45 +306,40 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         , pQueueFamilyIndices: nil
         , initialLayout: VkImageLayout.undefined
     )
+    vkCheck vkCreateImage(context.device, unsafeAddr depthImageCreateInfo, nil, addr context.depthImage.image)
 
-    var vkDepthImage: VkImage
-    vkCheck vkCreateImage(vkDevice, unsafeAddr vkImageCreateInfo, nil, addr vkDepthImage)
-
-    var vkMemoryRequirements: VkMemoryRequirements
-    vkCheck vkGetImageMemoryRequirements(vkDevice, vkDepthImage, addr vkMemoryRequirements)
-    var vkImageMemory = vkwAllocateDeviceMemory(vkDevice, selectedRenderDevice.memoryProperties, vkMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal)
-    vkCheck vkBindImageMemory(vkDevice, vkDepthImage, vkImageMemory, 0)
-
-    var vkQueue: VkQueue
-    vkCheck vkGetDeviceQueue(vkDevice, selectedRenderDevice.presentQueueIdx, 0, addr vkQueue)
+    var depthImageMemoryRequirements: VkMemoryRequirements
+    vkCheck vkGetImageMemoryRequirements(context.device, context.depthImage.image, addr depthImageMemoryRequirements)
+    context.depthImage.memory = vkwAllocateDeviceMemory(context.device, context.physicalDeviceMemoryProperties, depthImageMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.deviceLocal)
+    vkCheck vkBindImageMemory(context.device, context.depthImage.image, context.depthImage.memory, 0)
+    
+    let presentQueueIndex = context.physicalDeviceProperties.vulkanData.presentQueueIdx
+    vkCheck vkGetDeviceQueue(context.device, presentQueueIndex, 0, addr context.queue)
 
     let vkCommandPoolCreateInfo = VkCommandPoolCreateInfo(
         sType: VkStructureType.commandPoolCreateInfo
         , flags: uint32 VkCommandPoolCreateFlagBits.resetCommandBuffer
-        , queueFamilyIndex: selectedRenderDevice.presentQueueIdx
+        , queueFamilyIndex: presentQueueIndex
     )
-    var vkCommandPool: VkCommandPool
-    vkCheck vkCreateCommandPool(vkDevice, unsafeAddr vkCommandPoolCreateInfo, nil, addr vkCommandPool)
+    vkCheck vkCreateCommandPool(context.device, unsafeAddr vkCommandPoolCreateInfo, nil, addr context.commandPool)
 
-    let vkCommandBufferAllocateInfo = VkCommandBufferAllocateInfo(
+    let commandBufferAllocateInfo = VkCommandBufferAllocateInfo(
         sType: VkStructureType.commandBufferAllocateInfo
-        , commandPool: vkCommandPool
+        , commandPool: context.commandPool
         , level: VkCommandBufferLevel.primary
         , commandBufferCount: 1
     )
-    var vkSetupCmdBuffer, vkRenderCmdBuffer: VkCommandBuffer
-    vkCheck vkAllocateCommandBuffers(vkDevice, unsafeAddr vkCommandBufferAllocateInfo, addr vkSetupCmdBuffer)
-    vkCheck vkAllocateCommandBuffers(vkDevice, unsafeAddr vkCommandBufferAllocateInfo, addr vkRenderCmdBuffer)
+    vkCheck vkAllocateCommandBuffers(context.device, unsafeAddr commandBufferAllocateInfo, addr context.commandBuffer)
 
-    let vkSwapchainImages = vkGetSwapchainImagesKHR(vkDevice, vkSwapchain)
-    var vkImageTransitionStatus = repeat(false, vkSwapchainImages.len())
-    while vkImageTransitionStatus.any(proc (x: bool): bool = not x):
-        var presentBeginData = vkwPresentBegin(vkDevice, vkSwapchain, vkSetupCmdBuffer)
+    context.swapchainTextures = vkGetSwapchainImagesKHR(context.device, context.swapchain).mapIt VkwTexture(image: it, memory: vkNullHandle)
+    var swapchainTextureTransitionFlags = repeat(false, context.swapchainTextures.len())
+    while swapchainTextureTransitionFlags.anyIt(not it):
+        var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
 
-        if not vkImageTransitionStatus[int presentBeginData.imageIndex]:
-            vkImageTransitionStatus[int presentBeginData.imageIndex] = true
+        if not swapchainTextureTransitionFlags[int presentBeginData.imageIndex]:
+            swapchainTextureTransitionFlags[int presentBeginData.imageIndex] = true
 
-            let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
+            let layoutTransitionBarrier = VkImageMemoryBarrier(
                 sType: VkStructureType.imageMemoryBarrier
                 , srcAccessMask: 0
                 , dstAccessMask: uint32 VkAccessFlagBits.memoryRead
@@ -335,7 +347,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , newLayout: VkImageLayout.presentSrcKHR
                 , srcQueueFamilyIndex: high uint32
                 , dstQueueFamilyIndex: high uint32
-                , image: vkSwapchainImages[int presentBeginData.imageIndex]
+                , image: context.swapchainTextures[int presentBeginData.imageIndex].image
                 , subresourceRange: VkImageSubresourceRange(
                     aspectMask: uint32 VkImageAspectFlagBits.color
                     , baseMipLevel: 0
@@ -345,19 +357,19 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 )
             )
             vkCheck vkCmdPipelineBarrier(
-                vkSetupCmdBuffer
+                context.commandBuffer
                 , uint32 VkPipelineStageFlagBits.topOfPipe
                 , uint32 VkPipelineStageFlagBits.topOfPipe
                 , 0
                 , 0, nil
                 , 0, nil
-                , 1, unsafeAddr vkLayoutTransitionBarrier
+                , 1, unsafeAddr layoutTransitionBarrier
             )
         
-        vkwPresentEnd(vkDevice, vkSwapchain, vkSetupCmdBuffer, vkQueue, presentBeginData)
+        vkwPresentEnd(context.device, context.swapchain, context.commandBuffer, context.queue, presentBeginData)
 
     var
-        vkPresentImagesViewCreateInfo = VkImageViewCreateInfo(
+        presentImageViewCreateInfo = VkImageViewCreateInfo(
             sType: VkStructureType.imageViewCreateInfo
             , viewType: VkImageViewType.twoDee
             , format: colorFormat
@@ -370,24 +382,21 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , layerCount: 1
             )
         )
-        vkImageViews: seq[VkImageView]
+    context.swapchainTextures.applyIt:
+        var texture = it
+        presentImageViewCreateInfo.image = texture.image
+        vkCheck vkCreateImageView(context.device, unsafeAddr presentImageViewCreateInfo, nil, addr texture.view)
+        texture
 
-    for img in vkSwapchainImages:
-        vkPresentImagesViewCreateInfo.image = img
-        var vkImageView: VkImageView
-        vkCheck vkCreateImageView(vkDevice, unsafeAddr vkPresentImagesViewCreateInfo, nil, addr vkImageView)
-        vkImageViews.add vkImageView
-
-    let vkFenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
-    var vkSubmitFence: VkFence
-    vkCheck vkCreateFence(vkDevice, unsafeAddr vkFenceCreateInfo, nil, addr vkSubmitFence)
+    let submitFenceCreateInfo = VkFenceCreateInfo(sType: VkStructureType.fenceCreateInfo)
+    vkCheck vkCreateFence(context.device, unsafeAddr submitFenceCreateInfo, nil, addr context.submitFence)
 
     vkwTransitionImageLayout(
-        device = vkDevice
-        , image = vkDepthImage
-        , commandBuffer = vkSetupCmdBuffer
-        , queue = vkQueue
-        , fence = vkSubmitFence
+        device = context.device
+        , image = context.depthImage.image
+        , commandBuffer = context.commandBuffer
+        , queue = context.queue
+        , fence = context.submitFence
         , srcAccessMask = 0
         , dstAccessMask = uint32 maskCombine(VkAccessFlagBits.depthStencilAttachmentRead, VkAccessFlagBits.depthStencilAttachmentWrite)
         , oldLayout = VkImageLayout.undefined
@@ -399,9 +408,9 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
     let
         imageViewCreateInfo = VkImageViewCreateInfo(
             sType: VkStructureType.imageViewCreateInfo
-            , image: vkDepthImage
+            , image: context.depthImage.image
             , viewType: VkImageViewType.twoDee
-            , format: vkImageCreateInfo.format
+            , format: depthImageCreateInfo.format
             , components: VkComponentMapping(r: VkComponentSwizzle.identity, g: VkComponentSwizzle.identity, b: VkComponentSwizzle.identity, a: VkComponentSwizzle.identity)
             , subresourceRange: VkImageSubresourceRange(
                 aspectMask: uint32 VkImageAspectFlagBits.depth
@@ -411,8 +420,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , layerCount: 1
             )
         )
-    var vkDepthImageView: VkImageView
-    vkCheck vkCreateImageView(vkDevice, unsafeAddr imageViewCreateInfo, nil, addr vkDepthImageView)
+    vkCheck vkCreateImageView(context.device, unsafeAddr imageViewCreateInfo, nil, addr context.depthImage.view)
 
     let
         passAttachments = @[
@@ -458,16 +466,15 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , subpassCount: 1
             , pSubpasses: unsafeAddr subpass
         )
-    var vkRenderPass: VkRenderPass
-    vkCheck vkCreateRenderPass(vkDevice, unsafeAddr renderPassCreateInfo, nil, addr vkRenderPass)
+    vkCheck vkCreateRenderPass(context.device, unsafeAddr renderPassCreateInfo, nil, addr context.renderPass)
 
     var frameBufferAttachments: seq[VkImageView]
     frameBufferAttachments.setLen(2)
-    frameBufferAttachments[1] = vkDepthImageView
+    frameBufferAttachments[1] = context.depthImage.view
 
     let framebufferCreateInfo = VkFramebufferCreateInfo(
         sType: VkStructureType.framebufferCreateInfo
-        , renderPass: vkRenderPass
+        , renderPass: context.renderPass
         , attachmentCount: 2
         , pAttachments: addr frameBufferAttachments[0]
         , width: surfaceResolution.width
@@ -475,92 +482,74 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         , layers: 1
     )
 
-    var vkFramebuffers: seq[VkFramebuffer]
-    vkFramebuffers.setLen(vkImageViews.len())
-    for i, piv in vkImageViews:
-        frameBufferAttachments[0] = piv
-        vkCheck vkCreateFramebuffer(vkDevice, unsafeAddr framebufferCreateInfo, nil, addr vkFramebuffers[i])
+    context.framebuffers.setLen(context.swapchainTextures.len())
+    for i, swt in context.swapchainTextures:
+        frameBufferAttachments[0] = swt.view
+        vkCheck vkCreateFramebuffer(context.device, unsafeAddr framebufferCreateInfo, nil, addr context.framebuffers[i])
 
     type
         Vertex {.packed.} = object
             x, y, z, w: float32
             u, v: float32
-    let vkVertexBufferCreateInfo = VkBufferCreateInfo(
-        sType: VkStructureType.bufferCreateInfo
-        , size: uint64 sizeof(Vertex) * 6
-        , usage: uint32 VkBufferUsageFlagBits.vertexBuffer
-        , sharingMode: VkSharingMode.exclusive
+    
+    context.vertexBuffer = vkwAllocateBuffer(
+        context.device
+        , context.physicalDeviceMemoryProperties
+        , uint64 sizeof(Vertex) * 6
+        , uint32 VkBufferUsageFlagBits.vertexBuffer
     )
-    var vkVertexInputBuffer: VkBuffer
-    vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkVertexBufferCreateInfo, nil, addr vkVertexInputBuffer)
-
-    var vkVertexBufferMemoryRequirements: VkMemoryRequirements
-    vkGetBufferMemoryRequirements(vkDevice, vkVertexInputBuffer, addr vkVertexBufferMemoryRequirements)
-    var vkVertexBufferMemory = vkwAllocateDeviceMemory(vkDevice, selectedRenderDevice.memoryProperties, vkVertexBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
-
-    var vkVertexMappedMem: CArray[Vertex]
-    vkCheck vkMapMemory(vkDevice, vkVertexBufferMemory, 0, 0xFFFFFFFF_FFFFFFFF'u64, 0, cast[ptr pointer](addr vkVertexMappedMem))
-    vkVertexMappedMem[0] = Vertex(
-        x: -0.5, y: -0.5, z: 0, w: 1.0
-        , u: 0.0, v: 0.0)
-    vkVertexMappedMem[1] = Vertex(
-        x:  0.5, y: -0.5, z: 0, w: 1.0
-        , u: 1.0, v: 0.0)
-    vkVertexMappedMem[2] = Vertex(
-        x: -0.5, y:  0.5, z: 0, w: 1.0
-        , u: 0.0, v: 1.0)
-    vkVertexMappedMem[3] = vkVertexMappedMem[1]
-    vkVertexMappedMem[4] = Vertex(
-        x:  0.5, y:  0.5, z: 0, w: 1.0
-        , u: 1.0, v: 1.0)
-    vkVertexMappedMem[5] = vkVertexMappedMem[2]
-    vkCheck vkUnmapMemory(vkDevice, vkVertexBufferMemory)
-    vkCheck vkBindBufferMemory(vkDevice, vkVertexInputBuffer, vkVertexBufferMemory, 0)
-
+    
+    vkwWithMemory(context.device, context.vertexBuffer.memory, proc (memory: pointer) =
+        var vertexMemory = cast[CArray[Vertex]](memory)
+        vertexMemory[0] = Vertex(
+            x: -0.5, y: -0.5, z: 0, w: 1.0
+            , u: 0.0, v: 0.0)
+        vertexMemory[1] = Vertex(
+            x:  0.5, y: -0.5, z: 0, w: 1.0
+            , u: 1.0, v: 0.0)
+        vertexMemory[2] = Vertex(
+            x: -0.5, y:  0.5, z: 0, w: 1.0
+            , u: 0.0, v: 1.0)
+        vertexMemory[3] = vertexMemory[1]
+        vertexMemory[4] = Vertex(
+            x:  0.5, y:  0.5, z: 0, w: 1.0
+            , u: 1.0, v: 1.0)
+        vertexMemory[5] = vertexMemory[2]
+    )
     let
-        vkVertexShaderBytecode = readBinaryFile("./vert.spv")
-        vkFragmentShaderBytecode = readBinaryFile("./frag.spv")
-        vkVertexShaderCreateInfo = VkShaderModuleCreateInfo(
+        vertexShaderBytecode = readBinaryFile("./vert.spv")
+        fragmentShaderBytecode = readBinaryFile("./frag.spv")
+        vertexShaderCreateInfo = VkShaderModuleCreateInfo(
             sType: VkStructureType.shaderModuleCreateInfo
-            , codeSize: vkVertexShaderBytecode.len()
-            , pCode: cast[ptr uint32](unsafeAddr vkVertexShaderBytecode[0])
+            , codeSize: vertexShaderBytecode.len()
+            , pCode: cast[ptr uint32](unsafeAddr vertexShaderBytecode[0])
         )
-        vkFragmentShaderCreateInfo = VkShaderModuleCreateInfo(
+        fragmentShaderCreateInfo = VkShaderModuleCreateInfo(
             sType: VkStructureType.shaderModuleCreateInfo
-            , codeSize: vkFragmentShaderBytecode.len()
-            , pCode: cast[ptr uint32](unsafeAddr vkFragmentShaderBytecode[0])
+            , codeSize: fragmentShaderBytecode.len()
+            , pCode: cast[ptr uint32](unsafeAddr fragmentShaderBytecode[0])
         )
     var 
-        vkVertexShaderModule, vkFragmentShaderModule: VkShaderModule
-    vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkVertexShaderCreateInfo, nil, addr vkVertexShaderModule)
-    vkCheck vkCreateShaderModule(vkDevice, unsafeAddr vkFragmentShaderCreateInfo, nil, addr vkFragmentShaderModule)
+        vertexShaderModule, fragmentShaderModule: VkShaderModule
+    vkCheck vkCreateShaderModule(context.device, unsafeAddr vertexShaderCreateInfo, nil, addr vertexShaderModule)
+    vkCheck vkCreateShaderModule(context.device, unsafeAddr fragmentShaderCreateInfo, nil, addr fragmentShaderModule)
+    defer:
+        vkDestroyShaderModule(context.device, vertexShaderModule, nil)
+        vkDestroyShaderModule(context.device, fragmentShaderModule, nil)
 
     let
-        vkTextures = vkwLoadColorTextures(vkDevice, selectedRenderDevice.memoryProperties, vkSetupCmdBuffer, vkQueue, vkSubmitFence
+        vkTextures = vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence
                                         , @["debug_atlas.bmp"])
         vkDebugAtlasTexture = vkTextures[0]
 
-    type
-        ShaderUniform = object
-            buffer: VkBuffer
-            memory: VkDeviceMemory
-    var vkUniforms: ShaderUniform
-
-    let vkBufferCreateInfo = VkBufferCreateInfo(
-            sType: VkStructureType.bufferCreateInfo
-            , size: sizeof(float32) * 16
-            , usage: uint32 VkBufferUsageFlagBits.uniformBuffer
-            , sharingMode: VkSharingMode.exclusive
-        )
-    vkCheck vkCreateBuffer(vkDevice, unsafeAddr vkBufferCreateInfo, nil, addr vkUniforms.buffer)
-
-    var vkBufferMemoryRequirements: VkMemoryRequirements
-    vkCheck vkGetBufferMemoryRequirements(vkDevice, vkUniforms.buffer, addr vkBufferMemoryRequirements)
-    vkUniforms.memory = vkwAllocateDeviceMemory(vkDevice, selectedRenderDevice.memoryProperties, vkBufferMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
-    vkCheck vkBindBufferMemory(vkDevice, vkUniforms.buffer, vkUniforms.memory, 0)
+    context.uniforms = vkwAllocateBuffer(
+        context.device
+        , context.physicalDeviceMemoryProperties
+        , sizeof(float32) * 16
+        , uint32 VkBufferUsageFlagBits.uniformBuffer)
 
     let
-        vkBindings = @[
+        bindings = @[
             VkDescriptorSetLayoutBinding(
                 binding: 0
                 , descriptorType: VkDescriptorType.uniformBuffer
@@ -576,15 +565,17 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , pImmutableSamplers: nil
             )
         ]
-        vkSetLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo(
+        descriptorSetLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo(
             sType: VkStructureType.descriptorSetLayoutCreateInfo
-            , bindingCount: uint32 vkBindings.len()
-            , pBindings: unsafeAddr vkBindings[0]
+            , bindingCount: uint32 bindings.len()
+            , pBindings: unsafeAddr bindings[0]
         )
-    var vkSetLayout: VkDescriptorSetLayout
-    vkCheck vkCreateDescriptorSetLayout(vkDevice, unsafeAddr vkSetLayoutCreateInfo, nil, addr vkSetLayout)
+    var descriptorSetLayout: VkDescriptorSetLayout
+    vkCheck vkCreateDescriptorSetLayout(context.device, unsafeAddr descriptorSetLayoutCreateInfo, nil, addr descriptorSetLayout)
+    defer: vkDestroyDescriptorSetLayout(context.device, descriptorSetLayout, nil)
+    
     let
-        vkUniformBufferPoolSizes = @[
+        uniformBufferPoolSizes = @[
             VkDescriptorPoolSize(
                 descriptorType: VkDescriptorType.uniformBuffer
                 , descriptorCount: 1
@@ -594,96 +585,93 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , descriptorCount: 1
             )
         ]
-        vkPoolCreateInfo = VkDescriptorPoolCreateInfo(
+        descriptorPoolCreateInfo = VkDescriptorPoolCreateInfo(
             sType: VkStructureType.descriptorPoolCreateInfo
             , maxSets: 1
-            , poolSizeCount: uint32 vkUniformBufferPoolSizes.len()
-            , pPoolSizes: unsafeAddr vkUniformBufferPoolSizes[0]
+            , poolSizeCount: uint32 uniformBufferPoolSizes.len()
+            , pPoolSizes: unsafeAddr uniformBufferPoolSizes[0]
         )
-    var vkDescriptorPool: VkDescriptorPool
-    vkCheck vkCreateDescriptorPool(vkDevice, unsafeAddr vkPoolCreateInfo, nil, addr vkDescriptorPool)
+    vkCheck vkCreateDescriptorPool(context.device, unsafeAddr descriptorPoolCreateInfo, nil, addr context.descriptorPool)
 
-    let vkDescriptorAllocateInfo = VkDescriptorSetAllocateInfo(
+    let descriptorAllocateInfo = VkDescriptorSetAllocateInfo(
         sType: VkStructureType.descriptorSetAllocateInfo
-        , descriptorPool: vkDescriptorPool
+        , descriptorPool: context.descriptorPool
         , descriptorSetCount: 1
-        , pSetLayouts: addr vkSetLayout
+        , pSetLayouts: addr descriptorSetLayout
     )
-    var vkDescriptorSet: VkDescriptorSet
-    vkCheck vkAllocateDescriptorSets(vkDevice, unsafeAddr vkDescriptorAllocateInfo, addr vkDescriptorSet)
+    vkCheck vkAllocateDescriptorSets(context.device, unsafeAddr descriptorAllocateInfo, addr context.descriptorSet)
 
     let
-        vkDescriptorBufferInfo = VkDescriptorBufferInfo(
-            buffer: vkUniforms.buffer
+        descriptorBufferInfo = VkDescriptorBufferInfo(
+            buffer: context.uniforms.buffer
             , offset: 0
             , range: high uint64
         )
-        vkWriteDescriptor = VkWriteDescriptorSet(
+        writeDescriptorSet = VkWriteDescriptorSet(
             sType: VkStructureType.writeDescriptorSet
-            , dstSet: vkDescriptorSet
+            , dstSet: context.descriptorSet
             , dstBinding: 0
             , dstArrayElement: 0
             , descriptorCount: 1
             , descriptorType: VkDescriptorType.uniformBuffer
             , pImageInfo: nil
-            , pBufferInfo: unsafeAddr vkDescriptorBufferInfo
+            , pBufferInfo: unsafeAddr descriptorBufferInfo
             , pTexelBufferView: nil
         )
-    vkCheck vkUpdateDescriptorSets(vkDevice, 1, unsafeAddr vkWriteDescriptor, 0, nil)
+    vkCheck vkUpdateDescriptorSets(context.device, 1, unsafeAddr writeDescriptorSet, 0, nil)
 
     let
-        vkDescriptorImageInfo = VkDescriptorImageInfo(
+        descriptorImageInfo = VkDescriptorImageInfo(
             sampler: vkDebugAtlasTexture.sampler
-            , imageView: vkDebugAtlasTexture.view
+            , imageView: vkDebugAtlasTexture.texture.view
             , imageLayout: VkImageLayout.shaderReadOnlyOptimal
         )
-        vkImageWriteDescriptor = VkWriteDescriptorSet(
+        imageWriteDescriptor = VkWriteDescriptorSet(
             sType: VkStructureType.writeDescriptorSet
-            , dstSet: vkDescriptorSet
+            , dstSet: context.descriptorSet
             , dstBinding: 1
             , dstArrayElement: 0
             , descriptorCount: 1
             , descriptorType: VkDescriptorType.combinedImageSampler
-            , pImageInfo: unsafeAddr vkDescriptorImageInfo
+            , pImageInfo: unsafeAddr descriptorImageInfo
             , pBufferInfo: nil
             , pTexelBufferView: nil
         )
-    vkCheck vkUpdateDescriptorSets(vkDevice, 1, unsafeAddr vkImageWriteDescriptor, 0, nil)
+    vkCheck vkUpdateDescriptorSets(context.device, 1, unsafeAddr imageWriteDescriptor, 0, nil)
 
-    let vkPipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
+    let pipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
         sType: VkStructureType.pipelineLayoutCreateInfo
         , setLayoutCount: 1
-        , pSetLayouts: addr vkSetLayout
+        , pSetLayouts: addr descriptorSetLayout
         , pushConstantRangeCount: 0
         , pPushConstantRanges: nil
     )
-    var vkPipelineLayout: VkPipelineLayout
-    vkCheck vkCreatePipelineLayout(vkDevice, unsafeAddr vkPipelineLayoutCreateInfo, nil, addr vkPipelineLayout)
+    vkCheck vkCreatePipelineLayout(context.device, unsafeAddr pipelineLayoutCreateInfo, nil, addr context.pipelineLayout)
 
-    let vkPipelineShaderStageCreateInfos = @[
+    let pipelineShaderStageCreateInfos = @[
         VkPipelineShaderStageCreateInfo(
             sType: VkStructureType.pipelineShaderStageCreateInfo
             , stage: VkShaderStageFlagBits.vertex
-            , module: vkVertexShaderModule
+            , module: vertexShaderModule
             , pName: "main"
             , pSpecializationInfo: nil
         )
         , VkPipelineShaderStageCreateInfo(
             sType: VkStructureType.pipelineShaderStageCreateInfo
             , stage: VkShaderStageFlagBits.fragment
-            , module: vkFragmentShaderModule
+            , module: fragmentShaderModule
             , pName: "main"
             , pSpecializationInfo: nil
         )
     ]
 
     let
-        vkVertexInputBindingDescription = VkVertexInputBindingDescription(
+        vertexInputBindingDescription = VkVertexInputBindingDescription(
             binding: 0
             , stride: uint32 sizeof Vertex
             , inputRate: VkVertexInputRate.vertex
         )
-        vkVertexInputAttributeDescriptions = @[
+        vertexInputAttributeDescriptions = @[
             VkVertexInputAttributeDescription(
                 location: 0
                 , binding: 0
@@ -697,14 +685,14 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , offset: 4 * sizeof(float32)
             )
         ]
-        vkPipelineVertexInputStateCreateInfo = VkPipelineVertexInputStateCreateInfo(
+        pipelineVertexInputStateCreateInfo = VkPipelineVertexInputStateCreateInfo(
             sType: VkStructureType.pipelineVertexInputStateCreateInfo
             , vertexBindingDescriptionCount: 1
-            , pVertexBindingDescriptions: unsafeAddr vkVertexInputBindingDescription
-            , vertexAttributeDescriptionCount: uint32 vkVertexInputAttributeDescriptions.len()
-            , pVertexAttributeDescriptions: unsafeAddr vkVertexInputAttributeDescriptions[0]
+            , pVertexBindingDescriptions: unsafeAddr vertexInputBindingDescription
+            , vertexAttributeDescriptionCount: uint32 vertexInputAttributeDescriptions.len()
+            , pVertexAttributeDescriptions: unsafeAddr vertexInputAttributeDescriptions[0]
         )
-        vkPipelineInputAssemblyStateCreateInfo = VkPipelineInputAssemblyStateCreateInfo(
+        pipelineInputAssemblyStateCreateInfo = VkPipelineInputAssemblyStateCreateInfo(
             sType: VkStructureType.pipelineInputAssemblyStateCreateInfo
             , topology: VkPrimitiveTopology.triangleList
             , primitiveRestartEnable: vkFalse
@@ -714,7 +702,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , width: float32 surfaceResolution.width, height: float32 surfaceResolution.height
             , minDepth: 0, maxDepth: 1
         )
-        vkScisors = VkRect2D(
+        scissor = VkRect2D(
             offset: VkOffset2D(x: 0, y: 0)
             , extent: VkExtent2D(width: surfaceResolution.width, height: surfaceResolution.height)
         )
@@ -723,9 +711,9 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , viewportCount: 1
             , pViewports: unsafeAddr viewport
             , scissorCount: 1
-            , pScissors: unsafeAddr vkScisors
+            , pScissors: unsafeAddr scissor
         )
-        vkPipelineRasterizationStateCreateInfo = VkPipelineRasterizationStateCreateInfo(
+        pipelineRasterizationStateCreateInfo = VkPipelineRasterizationStateCreateInfo(
             sType: VkStructureType.pipelineRasterizationStateCreateInfo
             , depthClampEnable: vkFalse
             , rasterizerDiscardEnable: vkFalse
@@ -738,7 +726,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , depthBiasSlopeFactor: 0
             , lineWidth: 1
         )
-        vkPipelineMultisampleStateCreateInfo = VkPipelineMultisampleStateCreateInfo(
+        pipelineMultisampleStateCreateInfo = VkPipelineMultisampleStateCreateInfo(
             sType: VkStructureType.pipelineMultisampleStateCreateInfo
             , rasterizationSamples: VkSampleCountFlagBits.one
             , sampleShadingEnable: vkFalse
@@ -747,7 +735,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , alphaToCoverageEnable: vkFalse
             , alphaToOneEnable: vkFalse
         )
-        vkNoopStencilOpState = VkStencilOpState(
+        noopStencilOpState = VkStencilOpState(
             failOp: VkStencilOp.keep
             , passOp: VkStencilOp.keep
             , depthFailOp: VkStencilOp.keep
@@ -756,19 +744,19 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , writeMask: 0
             , reference: 0
         )
-        vkDepthState = VkPipelineDepthStencilStateCreateInfo(
+        depthState = VkPipelineDepthStencilStateCreateInfo(
             sType: pipelineDepthStencilStateCreateInfo
             , depthTestEnable: vkTrue
             , depthWriteEnable: vkTrue
             , depthCompareOp: VkCompareOp.lessOrEqual
             , depthBoundsTestEnable: vkFalse
             , stencilTestEnable: vkFalse
-            , front: vkNoopStencilOpState
-            , back: vkNoopStencilOpState
+            , front: noopStencilOpState
+            , back: noopStencilOpState
             , minDepthBounds: 0
             , maxDepthBounds: 0
         )
-        vkColorBlendAttachmentState = VkPipelineColorBlendAttachmentState(
+        colorBlendAttachmentState = VkPipelineColorBlendAttachmentState(
             blendEnable: vkFalse
             , srcColorBlendFactor: VkBlendFactor.srcColor
             , dstColorBlendFactor: VkBlendFactor.oneMinusDstColor
@@ -778,38 +766,176 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , alphaBlendOp: VkBlendOp.opAdd
             , colorWriteMask: 0xf
         )
-        vkColorBlendState = VkPipelineColorBlendStateCreateInfo(
+        colorBlendState = VkPipelineColorBlendStateCreateInfo(
             sType: VkStructureType.pipelineColorBlendStateCreateInfo
             , logicOpEnable: vkFalse
             , logicOp: VkLogicOp.opClear
             , attachmentCount: 1
-            , pAttachments: unsafeAddr vkColorBlendAttachmentState
+            , pAttachments: unsafeAddr colorBlendAttachmentState
             , blendConstants: [0'f32, 0, 0, 0]
         )
-        vkDynamicState = @[VkDynamicState.viewport, VkDynamicState.scissor]
-        vkDynamicStateCreateInfo = VkPipelineDynamicStateCreateInfo(
+        pipelineDynamicState = @[VkDynamicState.viewport, VkDynamicState.scissor]
+        pipelineDynamicStateCreateInfo = VkPipelineDynamicStateCreateInfo(
             sType: VkStructureType.pipelineDynamicStateCreateInfo
             , dynamicStateCount: 2
-            , pDynamicStates: unsafeAddr vkDynamicState[0]
+            , pDynamicStates: unsafeAddr pipelineDynamicState[0]
         )
-        vkPipelineCreateInfo = VkGraphicsPipelineCreateInfo(
+        pipelineCreateInfo = VkGraphicsPipelineCreateInfo(
             sType: VkStructureType.graphicsPipelineCreateInfo
             , stageCount: 2
-            , pStages: unsafeAddr vkPipelineShaderStageCreateInfos[0]
-            , pVertexInputState: unsafeAddr vkPipelineVertexInputStateCreateInfo
-            , pInputAssemblyState: unsafeAddr vkPipelineInputAssemblyStateCreateInfo
+            , pStages: unsafeAddr pipelineShaderStageCreateInfos[0]
+            , pVertexInputState: unsafeAddr pipelineVertexInputStateCreateInfo
+            , pInputAssemblyState: unsafeAddr pipelineInputAssemblyStateCreateInfo
             , pTessellationState: nil
             , pViewportState: unsafeAddr viewportStateCreateInfo
-            , pRasterizationState: unsafeAddr vkPipelineRasterizationStateCreateInfo
-            , pMultisampleState: unsafeAddr vkPipelineMultisampleStateCreateInfo
-            , pDepthStencilState: unsafeAddr vkDepthState
-            , pColorBlendState: unsafeAddr vkColorBlendState
-            , pDynamicState: unsafeAddr vkDynamicStateCreateInfo
-            , layout: vkPipelineLayout
-            , renderPass: vkRenderPass
+            , pRasterizationState: unsafeAddr pipelineRasterizationStateCreateInfo
+            , pMultisampleState: unsafeAddr pipelineMultisampleStateCreateInfo
+            , pDepthStencilState: unsafeAddr depthState
+            , pColorBlendState: unsafeAddr colorBlendState
+            , pDynamicState: unsafeAddr pipelineDynamicStateCreateInfo
+            , layout: context.pipelineLayout
+            , renderPass: context.renderPass
             , subpass: 0
             , basePipelineHandle: 0
             , basePipelineIndex: 0
         )
-    var vkPipeline: VkPipeline
-    vkCheck vkCreateGraphicsPipelines(vkDevice, vkNullHandle, 1, unsafeAddr vkPipelineCreateInfo, nil, addr vkPipeline)
+    vkCheck vkCreateGraphicsPipelines(context.device, vkNullHandle, 1, unsafeAddr pipelineCreateInfo, nil, addr context.pipeline)
+
+proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f) =
+    # TODO: move projection stuff outside?
+    let
+        unitPixelScale = 512'f32
+        model = mat4(1.0'f32).scale(unitPixelScale, unitPixelScale, 1.0'f32)
+        view = lookAt(
+            eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
+            , center = vec3(0.0'f32)
+            , up = vec3(0.0'f32, -1.0'f32, 0.0'f32)
+        ).translate(-cameraPosition)
+        projection = ortho(
+            float32(640) * -0.5'f32
+            , float32(640) * 0.5'f32
+            , float32(480) * -0.5'f32
+            , float32(480) * 0.5'f32
+            , 0.0'f32, 1.0'f32)
+        clip = mat4(
+            vec4(1.0'f32, 0.0'f32, 0.0'f32, 0.0'f32),
+            vec4(0.0'f32,-1.0'f32, 0.0'f32, 0.0'f32),
+            vec4(0.0'f32, 0.0'f32, 0.5'f32, 0.0'f32),
+            vec4(0.0'f32, 0.0'f32, 0.5'f32, 1.0'f32),
+        )
+    var mvp = (clip * projection * view * model).transpose()
+    vkwWithMemory(context.device, context.uniforms.memory, proc(memory: pointer) =
+        copyMem(memory, mvp.caddr, sizeof(float32) * 16)
+    )
+
+    var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
+    
+    let uniformMemoryBarrier = VkMemoryBarrier(
+        sType: VkStructureType.memoryBarrier
+        , srcAccessMask: uint32 VkAccessFlagBits.hostWrite
+        , dstAccessMask: uint32 VkAccessFlagBits.uniformRead
+    )
+    vkCheck vkCmdPipelineBarrier(
+        context.commandBuffer
+        , uint32 VkPipelineStageFlagBits.host
+        , uint32 VkPipelineStageFlagBits.vertexShader
+        , 0
+        , 1, unsafeAddr uniformMemoryBarrier
+        , 0, nil
+        , 0, nil
+    )
+
+    let vkLayoutTransitionBarrier = VkImageMemoryBarrier(
+        sType: VkStructureType.imageMemoryBarrier
+        , srcAccessMask: uint32 VkAccessFlagBits.memoryRead
+        , dstAccessMask: uint32 maskCombine(VkAccessFlagBits.colorAttachmentRead, VkAccessFlagBits.colorAttachmentWrite)
+        , oldLayout: VkImageLayout.presentSrcKHR
+        , newLayout: VkImageLayout.colorAttachmentOptimal
+        , srcQueueFamilyIndex: high uint32
+        , dstQueueFamilyIndex: high uint32
+        , image: context.swapchainTextures[int presentBeginData.imageIndex].image
+        , subresourceRange: VkImageSubresourceRange(
+            aspectMask: uint32 VkImageAspectFlagBits.color
+            , baseMipLevel: 0
+            , levelCount: 1
+            , baseArrayLayer: 0
+            , layerCount: 1
+        )
+    )
+    vkCheck vkCmdPipelineBarrier(
+        context.commandBuffer
+        , uint32 VkPipelineStageFlagBits.topOfPipe
+        , uint32 VkPipelineStageFlagBits.colorAttachmentOutput
+        , 0
+        , 0, nil
+        , 0, nil
+        , 1, unsafeAddr vkLayoutTransitionBarrier
+    )
+    let
+        clearValues = @[
+            VkClearValue(
+                color: VkClearColorValue(float32: [0.8'f32, 0.8, 0.8, 1.0])
+            )
+            , VkClearValue(
+                depthStencil: VkClearDepthStencilValue(depth: 1.0, stencil: 0)
+            )
+        ]
+        renderArea = VkRect2D(
+            offset: VkOffset2D(x: 0, y: 0)
+            # TODO: get rid of constants
+            , extent: VkExtent2D(width: 640, height: 480)
+        )
+        renderPassBeginInfo = VkRenderPassBeginInfo(
+            sType: VkStructureType.renderPassBeginInfo
+            , renderPass: context.renderPass
+            , framebuffer: context.framebuffers[int presentBeginData.imageIndex]
+            , renderArea: renderArea
+            , clearValueCount: 2
+            , pClearValues: unsafeAddr clearValues[0]
+        )
+    vkCheck vkCmdBeginRenderPass(context.commandBuffer, unsafeAddr renderPassBeginInfo, VkSubpassContents.inline)
+    vkCheck vkCmdBindPipeline(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipeline)
+    
+    let
+        # TODO: get rid of constants
+        viewport = VkViewport(x: 0, y: 0, width: float32 640, height: float32 480, minDepth: 0, maxDepth: 1)
+        scissor = renderArea
+    vkCheck vkCmdSetViewport(context.commandBuffer, 0, 1, unsafeAddr viewport)
+    vkCheck vkCmdSetScissor(context.commandBuffer, 0, 1, unsafeAddr scissor)
+    vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 0, 1, addr context.descriptorSet, 0, nil)
+
+    var offsets: VkDeviceSize
+    vkCheck vkCmdBindVertexBuffers(context.commandBuffer, 0, 1, addr context.vertexBuffer.buffer, addr offsets)
+    vkCheck vkCmdDraw(context.commandBuffer, 6, 1, 0, 0)
+
+    vkCheck vkCmdEndRenderPass(context.commandBuffer)
+
+    let prePresentBarrier = VkImageMemoryBarrier(
+        sType: VkStructureType.imageMemoryBarrier
+        , srcAccessMask: uint32 VkAccessFlagBits.colorAttachmentWrite
+        , dstAccessMask: uint32 VkAccessFlagBits.memoryRead
+        , oldLayout: VkImageLayout.colorAttachmentOptimal
+        , newLayout: VkImageLayout.presentSrcKHR
+        , srcQueueFamilyIndex: high uint32
+        , dstQueueFamilyIndex: high uint32
+        , image: context.swapchainTextures[int presentBeginData.imageIndex].image
+        , subresourceRange: VkImageSubresourceRange(
+            aspectMask: uint32 VkImageAspectFlagBits.color
+            , baseMipLevel: 0
+            , levelCount: 1
+            , baseArrayLayer: 0
+            , layerCount: 1
+        )
+    )
+    
+    vkCheck vkCmdPipelineBarrier(
+        context.commandBuffer
+        , uint32 VkPipelineStageFlagBits.allCommands
+        , uint32 VkPipelineStageFlagBits.bottomOfPipe
+        , 0
+        , 0, nil
+        , 0, nil
+        , 1, unsafeAddr prePresentBarrier
+    )
+    
+    vkwPresentEnd(context.device, context.swapchain, context.commandBuffer, context.queue, presentBeginData)
