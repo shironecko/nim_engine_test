@@ -17,6 +17,13 @@ type
         deviceType*: RdPhysicalDeviceType
         vendor*: RdPhysicalDeviceVendor
         vulkanData: VkwPhysicalDeviceDescription
+
+    RdSpriteRenderRequest* = object
+        x*, y*: float32
+        w*, h*: float32
+        u*, v*: float32
+    RdRenderList* = object
+        sprites*: seq[RdSpriteRenderRequest]
     
     RdContextState {.pure.} = enum
         uninitialized, preInitialized, initialized
@@ -175,6 +182,7 @@ proc rdPreInitialize*(window: WindowPtr): RdContext =
 
 proc rdGetCompatiblePhysicalDevices*(context: RdContext): seq[RdPhysicalDevice] =
     check context.state == RdContextState.preInitialized
+
     let physicalDevices = vkwEnumeratePhysicalDevicesWithDescriptions(context.instance, context.surface)
     physicalDevices
         .filter(proc (d: VkwPhysicalDeviceDescription): bool = d.hasPresentQueue)
@@ -189,6 +197,7 @@ proc rdGetCompatiblePhysicalDevices*(context: RdContext): seq[RdPhysicalDevice] 
 
 proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDevice) =
     check context.state == RdContextState.preInitialized
+    context.state = RdContextState.initialized
 
     let deviceVulkanData = selectedPhysicalDevice.vulkanData
     context.physicalDeviceProperties = selectedPhysicalDevice
@@ -801,10 +810,12 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         )
     vkCheck vkCreateGraphicsPipelines(context.device, vkNullHandle, 1, unsafeAddr pipelineCreateInfo, nil, addr context.pipeline)
 
-proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f) =
+proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: ref RdRenderList) =
+    check context.state == RdContextState.initialized
+
     # TODO: move projection stuff outside?
     let
-        unitPixelScale = 512'f32
+        unitPixelScale = 128.0'f32
         model = mat4(1.0'f32).scale(unitPixelScale, unitPixelScale, 1.0'f32)
         view = lookAt(
             eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
@@ -823,10 +834,12 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f) =
             vec4(0.0'f32, 0.0'f32, 0.5'f32, 0.0'f32),
             vec4(0.0'f32, 0.0'f32, 0.5'f32, 1.0'f32),
         )
-    var mvp = (clip * projection * view * model).transpose()
+    var shaderMVP = (clip * projection * view).transpose()
     vkwWithMemory(context.device, context.uniforms.memory, proc(memory: pointer) =
-        copyMem(memory, mvp.caddr, sizeof(float32) * 16)
+        copyMem(memory, shaderMVP.caddr, sizeof(float32) * 16)
     )
+
+    var 
 
     var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
     

@@ -95,33 +95,5 @@ block GameLoop:
 
         rdRenderAndPresent(renderContext, cameraPosition)
 
-# for texture in vkTextures:
-#     vkwFreeColorTexture(vkDevice, texture)
-# vkDestroyPipeline(vkDevice, vkPipeline, nil)
-# vkDestroyPipelineLayout(vkDevice, vkPipelineLayout, nil)
-# vkDestroyDescriptorPool(vkDevice, vkDescriptorPool, nil)
-# vkDestroyDescriptorSetLayout(vkDevice, vkSetlayout, nil)
-# vkDestroyBuffer(vkDevice, vkUniforms.buffer, nil)
-# vkFreeMemory(vkDevice, vkUniforms.memory, nil)
-# vkDestroyShaderModule(vkDevice, vkFragmentShaderModule, nil)
-# vkDestroyShaderModule(vkDevice, vkVertexShaderModule, nil)
-# vkDestroyBuffer(vkDevice, vkVertexInputBuffer, nil)
-# vkFreeMemory(vkDevice, vkVertexBufferMemory, nil)
-# for fb in vkFramebuffers:
-#     vkDestroyFramebuffer(vkDevice, fb, nil)
-# vkDestroyRenderPass(vkDevice, vkRenderPass, nil)
-# for imgView in vkImageViews:
-#     vkDestroyImageView(vkDevice, imgView, nil)
-# vkDestroyImageView(vkDevice, vkDepthImageView, nil)
-# vkDestroyImage(vkDevice, vkDepthImage, nil)
-# vkFreeMemory(vkDevice, vkImageMemory, nil)
-# vkDestroyFence(vkDevice, vkSubmitFence, nil)
-# vkFreeCommandBuffers(vkDevice, vkCommandPool, 1, addr vkRenderCmdBuffer)
-# vkFreeCommandBuffers(vkDevice, vkCommandPool, 1, addr vkSetupCmdBuffer)
-# vkDestroyCommandPool(vkDevice, vkCommandPool, nil)
-# vkDestroySwapchainKHR(vkDevice, vkSwapchain, nil)
-# vkDestroyDevice(vkDevice, nil)
-# vkDestroyDebugReportCallbackEXT(vkInstance, vkDebugCallback, nil)
-# vkDestroyInstance(vkInstance, nil)
 destroyWindow(window)
 sdl2.quit()
