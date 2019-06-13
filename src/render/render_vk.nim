@@ -7,7 +7,12 @@ import vulkan_wrapper
 import ../log
 import ../utility
 
-const VERTEX_BUFFER_SIZE = 1000 * 6
+const
+    MAX_SPRITES_PER_FRAME = 1000
+    VERTEX_BUFFER_SIZE = MAX_SPRITES_PER_FRAME * 6
+    INVALID_TEXTURE_ID = -1
+    MAX_TEXTURES_LOADED = 512
+    DEBUG_ATLAS_TEXTURE_ID = 0
 
 type
     RdPhysicalDeviceType* {.pure.} = enum
@@ -20,15 +25,21 @@ type
         vendor*: RdPhysicalDeviceVendor
         vulkanData: VkwPhysicalDeviceDescription
 
+    RdTexture* = object # a texture is actually just an index into descriptor sets array
+        id: int
     RdSpriteRenderRequest* = object
         x*, y*: float32
         w*, h*: float32
         minUV*, maxUV*: Vec2f
+        texture*: RdTexture
     RdRenderList* = object
         sprites*: seq[RdSpriteRenderRequest]
     
     RdContextState {.pure.} = enum
         uninitialized, preInitialized, initialized
+    RdDescriptorSetAllocateData = object
+        pool: VkDescriptorPool
+        layout: VkDescriptorSetLayout
     RdContext* = object
         state: RdContextState
         instance: VkInstance
@@ -55,6 +66,8 @@ type
         descriptorSet: VkDescriptorSet
         pipelineLayout: VkPipelineLayout
         pipeline: VkPipeline
+        textureDescriptorSetAllocationData: RdDescriptorSetAllocateData
+        textureDescriptorSets: seq[VkDescriptorSet]
 
 type
     Vertex {.packed.} = object
@@ -203,6 +216,8 @@ proc rdGetCompatiblePhysicalDevices*(context: RdContext): seq[RdPhysicalDevice] 
                 , vulkanData: d
             )
         )
+
+proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture]
 
 proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDevice) =
     check context.state == RdContextState.preInitialized
@@ -512,23 +527,6 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         , uint32 VkBufferUsageFlagBits.vertexBuffer
     )
     
-    vkwWithMemory(context.device, context.vertexBuffer.memory, proc (memory: pointer) =
-        var vertexMemory = cast[CArray[Vertex]](memory)
-        vertexMemory[0] = Vertex(
-            x: -0.5, y: -0.5, z: 0, w: 1.0
-            , u: 0.0, v: 0.0)
-        vertexMemory[1] = Vertex(
-            x:  0.5, y: -0.5, z: 0, w: 1.0
-            , u: 1.0, v: 0.0)
-        vertexMemory[2] = Vertex(
-            x: -0.5, y:  0.5, z: 0, w: 1.0
-            , u: 0.0, v: 1.0)
-        vertexMemory[3] = vertexMemory[1]
-        vertexMemory[4] = Vertex(
-            x:  0.5, y:  0.5, z: 0, w: 1.0
-            , u: 1.0, v: 1.0)
-        vertexMemory[5] = vertexMemory[2]
-    )
     let
         vertexShaderBytecode = readBinaryFile("./vert.spv")
         fragmentShaderBytecode = readBinaryFile("./frag.spv")
@@ -550,10 +548,42 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         vkDestroyShaderModule(context.device, vertexShaderModule, nil)
         vkDestroyShaderModule(context.device, fragmentShaderModule, nil)
 
-    let
-        vkTextures = vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence
-                                        , @["debug_atlas.bmp"])
-        vkDebugAtlasTexture = vkTextures[0]
+    block TextureDescriptorSetAllocationDataSetup:
+        let
+            binding = VkDescriptorSetLayoutBinding(
+                binding: 0
+                , descriptorType: VkDescriptorType.combinedImageSampler
+                , descriptorCount: 1
+                , stageFlags: uint32 VkShaderStageFlagBits.fragment
+                , pImmutableSamplers: nil
+            )
+            descriptorSetLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo(
+                sType: VkStructureType.descriptorSetLayoutCreateInfo
+                , bindingCount: 1
+                , pBindings: unsafeAddr binding
+            )
+        vkCheck vkCreateDescriptorSetLayout(context.device, unsafeAddr descriptorSetLayoutCreateInfo, nil, addr context.textureDescriptorSetAllocationData.layout)
+        
+        let
+            textureDescriptorPoolSizes = @[
+                VkDescriptorPoolSize(
+                    descriptorType: VkDescriptorType.combinedImageSampler
+                    , descriptorCount: 1
+                )
+            ]
+            descriptorPoolCreateInfo = VkDescriptorPoolCreateInfo(
+                sType: VkStructureType.descriptorPoolCreateInfo
+                , maxSets: MAX_TEXTURES_LOADED
+                , poolSizeCount: uint32 textureDescriptorPoolSizes.len()
+                , pPoolSizes: unsafeAddr textureDescriptorPoolSizes[0]
+            )
+        vkCheck vkCreateDescriptorPool(context.device, unsafeAddr descriptorPoolCreateInfo, nil, addr context.textureDescriptorSetAllocationData.pool)
+    
+    let 
+        debugTextureDescriptorIDs = rdLoadTextures(context, @["debug_atlas.bmp"])
+        debugTextureDescriptorID = debugTextureDescriptorIDs[0]
+    check debugTextureDescriptorIDs.len() == 1
+    check debugTextureDescriptorID.id == DEBUG_ATLAS_TEXTURE_ID
 
     context.uniforms = vkwAllocateBuffer(
         context.device
@@ -570,13 +600,6 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , stageFlags: uint32 VkShaderStageFlagBits.vertex
                 , pImmutableSamplers: nil
             )
-            , VkDescriptorSetLayoutBinding(
-                binding: 1
-                , descriptorType: VkDescriptorType.combinedImageSampler
-                , descriptorCount: 1
-                , stageFlags: uint32 VkShaderStageFlagBits.fragment
-                , pImmutableSamplers: nil
-            )
         ]
         descriptorSetLayoutCreateInfo = VkDescriptorSetLayoutCreateInfo(
             sType: VkStructureType.descriptorSetLayoutCreateInfo
@@ -591,10 +614,6 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         uniformBufferPoolSizes = @[
             VkDescriptorPoolSize(
                 descriptorType: VkDescriptorType.uniformBuffer
-                , descriptorCount: 1
-            )
-            , VkDescriptorPoolSize(
-                descriptorType: VkDescriptorType.combinedImageSampler
                 , descriptorCount: 1
             )
         ]
@@ -632,33 +651,17 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , pTexelBufferView: nil
         )
     vkCheck vkUpdateDescriptorSets(context.device, 1, unsafeAddr writeDescriptorSet, 0, nil)
+    
 
     let
-        descriptorImageInfo = VkDescriptorImageInfo(
-            sampler: vkDebugAtlasTexture.sampler
-            , imageView: vkDebugAtlasTexture.texture.view
-            , imageLayout: VkImageLayout.shaderReadOnlyOptimal
+        descriptorSetLayouts = @[descriptorSetLayout, context.textureDescriptorSetAllocationData.layout]
+        pipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
+            sType: VkStructureType.pipelineLayoutCreateInfo
+            , setLayoutCount: 2
+            , pSetLayouts: unsafeAddr descriptorSetLayouts[0]
+            , pushConstantRangeCount: 0
+            , pPushConstantRanges: nil
         )
-        imageWriteDescriptor = VkWriteDescriptorSet(
-            sType: VkStructureType.writeDescriptorSet
-            , dstSet: context.descriptorSet
-            , dstBinding: 1
-            , dstArrayElement: 0
-            , descriptorCount: 1
-            , descriptorType: VkDescriptorType.combinedImageSampler
-            , pImageInfo: unsafeAddr descriptorImageInfo
-            , pBufferInfo: nil
-            , pTexelBufferView: nil
-        )
-    vkCheck vkUpdateDescriptorSets(context.device, 1, unsafeAddr imageWriteDescriptor, 0, nil)
-
-    let pipelineLayoutCreateInfo = VkPipelineLayoutCreateInfo(
-        sType: VkStructureType.pipelineLayoutCreateInfo
-        , setLayoutCount: 1
-        , pSetLayouts: addr descriptorSetLayout
-        , pushConstantRangeCount: 0
-        , pPushConstantRanges: nil
-    )
     vkCheck vkCreatePipelineLayout(context.device, unsafeAddr pipelineLayoutCreateInfo, nil, addr context.pipelineLayout)
 
     let pipelineShaderStageCreateInfos = @[
@@ -814,6 +817,54 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         )
     vkCheck vkCreateGraphicsPipelines(context.device, vkNullHandle, 1, unsafeAddr pipelineCreateInfo, nil, addr context.pipeline)
 
+proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture] =
+    check context.state == RdContextState.initialized
+
+    let 
+        textures = vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence, paths)
+        descriptorSetLayouts = repeat(context.textureDescriptorSetAllocationData.layout, textures.len())
+        descriptorAllocateInfo = VkDescriptorSetAllocateInfo(
+            sType: VkStructureType.descriptorSetAllocateInfo
+            , descriptorPool: context.textureDescriptorSetAllocationData.pool
+            , descriptorSetCount: uint32 descriptorSetLayouts.len()
+            , pSetLayouts: unsafeAddr descriptorSetLayouts[0]
+        )
+    var textureDescriptorSets: seq[VkDescriptorSet]
+    textureDescriptorSets.setLen(textures.len())
+    vkCheck vkAllocateDescriptorSets(context.device, unsafeAddr descriptorAllocateInfo, addr textureDescriptorSets[0])
+
+    type
+        ImageWriteInfo = object
+            imageInfos: seq[VkDescriptorImageInfo]
+            writeDescriptors: seq[VkWriteDescriptorSet]
+    var imageWriteInfo: ImageWriteInfo
+    for i in 0..<textures.len():
+        let
+            texture = textures[i]
+            descriptorSet = textureDescriptorSets[i]
+        imageWriteInfo.imageInfos.add VkDescriptorImageInfo(
+            sampler: texture.sampler
+            , imageView: texture.texture.view
+            , imageLayout: VkImageLayout.shaderReadOnlyOptimal
+        )
+        imageWriteInfo.writeDescriptors.add VkWriteDescriptorSet(
+            sType: VkStructureType.writeDescriptorSet
+            , dstSet: descriptorSet
+            , dstBinding: 0
+            , dstArrayElement: 0
+            , descriptorCount: 1
+            , descriptorType: VkDescriptorType.combinedImageSampler
+            , pImageInfo: addr imageWriteInfo.imageInfos[imageWriteInfo.imageInfos.len() - 1]
+            , pBufferInfo: nil
+            , pTexelBufferView: nil
+        )
+
+    vkCheck vkUpdateDescriptorSets(context.device, uint32 imageWriteInfo.writeDescriptors.len(), addr imageWriteInfo.writeDescriptors[0], 0, nil)
+
+    for descriptorSet in textureDescriptorSets:
+        context.textureDescriptorSets.add descriptorSet
+        result.add RdTexture(id: context.textureDescriptorSets.len() - 1)
+
 proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: RdRenderList) =
     check context.state == RdContextState.initialized
 
@@ -840,7 +891,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
     vkwWithMemory(context.device, context.uniforms.memory, proc(memory: pointer) =
         copyMem(memory, shaderMVP.caddr, sizeof(float32) * 16)
     )
-
+    
     vkwWithMemory(context.device, context.vertexBuffer.memory, proc(memory: pointer) =
         var vertices = cast[ptr UncheckedArray[Vertex]](memory)
         for i, sprite in renderList.sprites:
@@ -950,6 +1001,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
     vkCheck vkCmdSetViewport(context.commandBuffer, 0, 1, unsafeAddr viewport)
     vkCheck vkCmdSetScissor(context.commandBuffer, 0, 1, unsafeAddr scissor)
     vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 0, 1, addr context.descriptorSet, 0, nil)
+    vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 1, 1, addr context.textureDescriptorSets[0], 0, nil)
 
     var offsets: VkDeviceSize
     vkCheck vkCmdBindVertexBuffers(context.commandBuffer, 0, 1, addr context.vertexBuffer.buffer, addr offsets)
