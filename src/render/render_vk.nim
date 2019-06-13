@@ -844,7 +844,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
     vkwWithMemory(context.device, context.vertexBuffer.memory, proc(memory: pointer) =
         var vertices = cast[ptr UncheckedArray[Vertex]](memory)
         for i, sprite in renderList.sprites:
-            var model = mat4f(1.0).translate(sprite.x, sprite.y, 0.0).scale(sprite.w, sprite.h, 1.0)
+            var model = mat4f(1.0).translate(sprite.x, sprite.y, 0.0).scale(sprite.w, sprite.h, 1.0).transpose()
             let offset = i * 6
             let plane = @[
                 newVertex(vec4f(x = -0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.minUV.y),
