@@ -7,6 +7,8 @@ import vulkan_wrapper
 import ../log
 import ../utility
 
+const VERTEX_BUFFER_SIZE = 1000 * 6
+
 type
     RdPhysicalDeviceType* {.pure.} = enum
         other, integratedGpu, discreteGpu, virtualGpu, cpu
@@ -21,7 +23,7 @@ type
     RdSpriteRenderRequest* = object
         x*, y*: float32
         w*, h*: float32
-        u*, v*: float32
+        minUV*, maxUV*: Vec2f
     RdRenderList* = object
         sprites*: seq[RdSpriteRenderRequest]
     
@@ -53,6 +55,13 @@ type
         descriptorSet: VkDescriptorSet
         pipelineLayout: VkPipelineLayout
         pipeline: VkPipeline
+
+type
+    Vertex {.packed.} = object
+        x, y, z, w: float32
+        u, v: float32
+
+proc newVertex(position: Vec4f, u, v: float32): Vertex = Vertex(x: position.x, y: position.y, z: position.z, w: position.w, u: u, v: v)
 
 template convert[B: RdPhysicalDeviceType](a: VkPhysicalDeviceType): B =
     case a:
@@ -495,16 +504,11 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
     for i, swt in context.swapchainTextures:
         frameBufferAttachments[0] = swt.view
         vkCheck vkCreateFramebuffer(context.device, unsafeAddr framebufferCreateInfo, nil, addr context.framebuffers[i])
-
-    type
-        Vertex {.packed.} = object
-            x, y, z, w: float32
-            u, v: float32
     
     context.vertexBuffer = vkwAllocateBuffer(
         context.device
         , context.physicalDeviceMemoryProperties
-        , uint64 sizeof(Vertex) * 6
+        , uint64 sizeof(Vertex) * VERTEX_BUFFER_SIZE
         , uint32 VkBufferUsageFlagBits.vertexBuffer
     )
     
@@ -810,13 +814,11 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         )
     vkCheck vkCreateGraphicsPipelines(context.device, vkNullHandle, 1, unsafeAddr pipelineCreateInfo, nil, addr context.pipeline)
 
-proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: ref RdRenderList) =
+proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: RdRenderList) =
     check context.state == RdContextState.initialized
 
     # TODO: move projection stuff outside?
     let
-        unitPixelScale = 128.0'f32
-        model = mat4(1.0'f32).scale(unitPixelScale, unitPixelScale, 1.0'f32)
         view = lookAt(
             eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
             , center = vec3(0.0'f32)
@@ -839,9 +841,41 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
         copyMem(memory, shaderMVP.caddr, sizeof(float32) * 16)
     )
 
-    var 
+    vkwWithMemory(context.device, context.vertexBuffer.memory, proc(memory: pointer) =
+        var vertices = cast[ptr UncheckedArray[Vertex]](memory)
+        for i, sprite in renderList.sprites:
+            var model = mat4f(1.0).translate(sprite.x, sprite.y, 0.0).scale(sprite.w, sprite.h, 1.0)
+            let offset = i * 6
+            let plane = @[
+                newVertex(vec4f(x = -0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.minUV.y),
+                newVertex(vec4f(x =  0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.minUV.y),
+                newVertex(vec4f(x = -0.5, y =  0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.maxUV.y),
+                newVertex(vec4f(x =  0.5, y =  0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.maxUV.y),
+            ]
+            vertices[offset + 0] = plane[0]
+            vertices[offset + 1] = plane[1]
+            vertices[offset + 2] = plane[2]
+            vertices[offset + 3] = plane[1]
+            vertices[offset + 4] = plane[3]
+            vertices[offset + 5] = plane[2]
+    )
 
     var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
+
+    let vertexMemoryBarrier = VkMemoryBarrier(
+        sType: VkStructureType.memoryBarrier
+        , srcAccessMask: uint32 VkAccessFlagBits.hostWrite
+        , dstAccessMask: uint32 VkAccessFlagBits.vertexAttributeRead
+    )
+    vkCheck vkCmdPipelineBarrier(
+        context.commandBuffer
+        , uint32 VkPipelineStageFlagBits.host
+        , uint32 VkPipelineStageFlagBits.vertexInput
+        , 0
+        , 1, unsafeAddr vertexMemoryBarrier
+        , 0, nil
+        , 0, nil
+    )
     
     let uniformMemoryBarrier = VkMemoryBarrier(
         sType: VkStructureType.memoryBarrier
@@ -919,7 +953,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
 
     var offsets: VkDeviceSize
     vkCheck vkCmdBindVertexBuffers(context.commandBuffer, 0, 1, addr context.vertexBuffer.buffer, addr offsets)
-    vkCheck vkCmdDraw(context.commandBuffer, 6, 1, 0, 0)
+    vkCheck vkCmdDraw(context.commandBuffer, uint32 renderList.sprites.len() * 6, 1, 0, 0)
 
     vkCheck vkCmdEndRenderPass(context.commandBuffer)
 
