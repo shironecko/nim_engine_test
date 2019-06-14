@@ -4,6 +4,7 @@ import sugar
 import glm
 import sdl2
 import vulkan_wrapper
+import debug_font
 import ../log
 import ../utility
 
@@ -12,7 +13,7 @@ const
     VERTEX_BUFFER_SIZE = MAX_SPRITES_PER_FRAME * 6
     INVALID_TEXTURE_ID = -1
     MAX_TEXTURES_LOADED = 512
-    DEBUG_ATLAS_TEXTURE_ID = 0
+    DEBUG_FONT_TEXTURE_ID = 0
 
 type
     RdPhysicalDeviceType* {.pure.} = enum
@@ -40,6 +41,23 @@ type
     RdDescriptorSetAllocateData = object
         pool: VkDescriptorPool
         layout: VkDescriptorSetLayout
+    
+    RdBitmapFontHeader {.packed.} = object
+        signatureBytes: array[2, uint8]
+        width, height: uint32
+        cellWidth, cellHeight: uint32
+        bitsPerPixel: uint8
+        baseCharacter: uint8
+        characterWidth: array[256, uint8]
+    RdBitmapFontTexturePixel* = object
+        r, g, b, a: float32
+    RdBitmapFontData = object
+        cellWidth, cellHeight: uint32
+        textureWidth, textureHeight: uint32
+        baseCharacter: uint8
+        pixels: seq[RdBitmapFontTexturePixel]
+        texture: RdTexture
+
     RdContext* = object
         state: RdContextState
         instance: VkInstance
@@ -68,6 +86,27 @@ type
         pipeline: VkPipeline
         textureDescriptorSetAllocationData: RdDescriptorSetAllocateData
         textureDescriptorSets: seq[VkDescriptorSet]
+        bitmapFonts: seq[RdBitmapFontData]
+
+proc rdLoadBitmapFontData(path: string): RdBitmapFontData =
+    var
+        fontContents = readBinaryFile(path)
+        fontHeader = cast[ptr RdBitmapFontHeader](addr fontContents[0])
+        fontPixels = cast[ptr UncheckedArray[uint8]](addr fontContents[sizeof(RdBitmapFontHeader)])
+        pixelCount = fontHeader.width * fontHeader.height
+    check fontHeader.signatureBytes[0] == 0xBF'u8 and fontHeader.signatureBytes[1] == 0xF2'u8, "Debug font file header signature mismatch!"
+    check fontHeader.bitsPerPixel == 8, &"Debug font file bitness per pixel mismant! Expected: 8, Got: {fontHeader.bitsPerPixel}"
+    result.textureWidth = fontHeader.width
+    result.textureHeight = fontHeader.height
+    result.cellWidth = fontHeader.cellWidth
+    result.cellHeight = fontHeader.cellHeight
+    result.baseCharacter = fontHeader.baseCharacter
+    result.pixels.setLen(pixelCount)
+    for i in 0..<pixelCount:
+        let pixel =
+            if fontPixels[i] >= 127'u8: RdBitmapFontTexturePixel(r:1.0'f32, g:1.0'f32, b:1.0'f32, a:1.0'f32)
+            else: RdBitmapFontTexturePixel(r:0.0'f32, g:0.0'f32, b:0.0'f32, a:1.0'f32)
+        result.pixels.add pixel
 
 type
     Vertex {.packed.} = object
@@ -583,7 +622,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         debugTextureDescriptorIDs = rdLoadTextures(context, @["debug_atlas.bmp"])
         debugTextureDescriptorID = debugTextureDescriptorIDs[0]
     check debugTextureDescriptorIDs.len() == 1
-    check debugTextureDescriptorID.id == DEBUG_ATLAS_TEXTURE_ID
+    check debugTextureDescriptorID.id == DEBUG_FONT_TEXTURE_ID
 
     context.uniforms = vkwAllocateBuffer(
         context.device

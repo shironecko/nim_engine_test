@@ -421,38 +421,44 @@ type
         sampler*: VkSampler
 
 proc vkwLoadTextureSurface(path: string, desiredPixelFormat: uint32): SurfacePtr =
-    var textureSurface = loadBMP(path)
-    sdlCheck textureSurface != nil, &"Failed to load texture surface: {path}!"
+    var texturePixelsData = loadBMP(path)
+    sdlCheck texturePixelsData != nil, &"Failed to load texture surface: {path}!"
 
-    if textureSurface.format.format != desiredPixelFormat:
-        var convertedTextureSurface = convertSurfaceFormat(textureSurface, desiredPixelFormat, 0)
+    if texturePixelsData.format.format != desiredPixelFormat:
+        var convertedTextureSurface = convertSurfaceFormat(texturePixelsData, desiredPixelFormat, 0)
         sdlCheck convertedTextureSurface != nil, &"Failed to convert texture surface at {path} to pixel format of {desiredPixelFormat}!"
         sdlCheck convertedTextureSurface.format.format == desiredPixelFormat, &"Failed to convert texture surface at {path} to pixel format of {desiredPixelFormat}! Format after conversion: {convertedTextureSurface.format.format}."
-        freeSurface(textureSurface)
+        freeSurface(texturePixelsData)
         convertedTextureSurface
     else:
-        textureSurface
+        texturePixelsData
+
+type
+    VkwTexturePixelsFormat* {.pure.} = enum
+        RGB24
+    VkwTexturePixelRGB24* {.packed.} = object
+        r, g, b: uint8
+    VkwTexturePixels* = object
+        format*: VkwTexturePixelsFormat
+        w*, h*: uint32
+        pixelsData*: ptr UncheckedArray[uint8]
 
 proc vkwLoadColorTextures*(
-        device: VkDevice
-        , memoryProperties: VkPhysicalDeviceMemoryProperties
-        , commandBuffer: var VkCommandBuffer
-        , queue: VkQueue
-        , fence: var VkFence
-        , texturePaths: seq[string]
-    ): seq[VkwTextureWithSampler] =
-    for texPath in texturePaths:
+    device: VkDevice
+    , memoryProperties: VkPhysicalDeviceMemoryProperties
+    , commandBuffer: var VkCommandBuffer
+    , queue: VkQueue
+    , fence: var VkFence
+    , texturePixelsDataSequence: seq[VkwTexturePixels]
+): seq[VkwTextureWithSampler] =
+    for texturePixelsData in texturePixelsDataSequence:
         var texture: VkwTexture
-
-        let desiredTextureSurfacePixelFormat = SDL_PIXELFORMAT_RGB24
-        var textureSurface = vkwLoadTextureSurface(texPath, desiredTextureSurfacePixelFormat)
-        defer: freeSurface(textureSurface)
 
         let textureCreateInfo = VkImageCreateInfo(
             sType: VkStructureType.imageCreateInfo
             , imageType: VkImageType.twoDee
             , format: VkFormat.r32g32b32a32SFloat
-            , extent: VkExtent3D(width: uint32 textureSurface.w, height: uint32 textureSurface.h, depth: 1)
+            , extent: VkExtent3D(width: uint32 texturePixelsData.w, height: uint32 texturePixelsData.h, depth: 1)
             , mipLevels: 1
             , arrayLayers: 1
             , samples: VkSampleCountFlagBits.one
@@ -471,13 +477,12 @@ proc vkwLoadColorTextures*(
         type
             VulkanTexturePixel {.packed.} = object
                 r, g, b, a: float32
-            SdlSurfacePixel {.packed.} = object
-                r, g, b: uint8
         var textureMappedMemory: ptr UncheckedArray[VulkanTexturePixel]
         vkCheck vkMapMemory(device, texture.memory, 0, high uint64, 0, cast[ptr pointer](addr textureMappedMemory))
-        var sdlSurfacePixels = cast[ptr UncheckedArray[SdlSurfacePixel]](textureSurface.pixels)
-        for i in 0..<(textureSurface.w * textureSurface.h):
-            let p = sdlSurfacePixels[i]
+        # TODO: actual support for different formats
+        var texturePixels = cast[ptr UncheckedArray[VkwTexturePixelRGB24]](texturePixelsData.pixelsData)
+        for i in 0..<(texturePixelsData.w * texturePixelsData.h):
+            let p = texturePixels[i]
             textureMappedMemory[i] = VulkanTexturePixel(
                 r: float32(p.r) / 256.0'f32
                 , g: float32(p.g) / 256.0'f32
@@ -544,6 +549,31 @@ proc vkwLoadColorTextures*(
         vkCheck vkCreateSampler(device, unsafeAddr samplerCreateInfo, nil, addr sampler)
 
         result.add(VkwTextureWithSampler(texture: texture, sampler: sampler))
+
+
+proc vkwLoadColorTextures*(
+    device: VkDevice
+    , memoryProperties: VkPhysicalDeviceMemoryProperties
+    , commandBuffer: var VkCommandBuffer
+    , queue: VkQueue
+    , fence: var VkFence
+    , texturePaths: seq[string]
+    ): seq[VkwTextureWithSampler] =
+    var sdlSurfacesToFree: seq[SurfacePtr]
+    let texturePixelsDataSequence = texturePaths.mapIt:
+        let desiredTextureSurfacePixelFormat = SDL_PIXELFORMAT_RGB24
+        var sdlSurface = vkwLoadTextureSurface(it, desiredTextureSurfacePixelFormat)
+        sdlSurfacesToFree.add sdlSurface
+        VkwTexturePixels(
+            format: VkwTexturePixelsFormat.RGB24
+            , w: uint32 sdlSurface.w
+            , h: uint32 sdlSurface.h
+            , pixelsData: cast[ptr UncheckedArray[uint8]](sdlSurface.pixels)
+        )
+
+    result = vkwLoadColorTextures(device, memoryProperties, commandBuffer, queue, fence, texturePixelsDataSequence)
+    for surface in sdlSurfacesToFree: freeSurface(surface)
+
 
 proc vkwFreeTexture*(
         device: VkDevice
