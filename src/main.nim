@@ -9,6 +9,7 @@ import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportC
 import render/vulkan_wrapper
 import render/render_vk
 import utility
+import ecs
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
@@ -61,6 +62,88 @@ proc updateRenderResolution(winDim : WindowDimentions) =
 
 updateRenderResolution(windowDimentions)
 
+var world: World
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(0, -150))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0, 0)
+        , maxUV: vec2f(0.25, 0.25)
+        , texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(0, 0))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0, 0)
+        , maxUV: vec2f(0.25, 0.25)
+        #, texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(150, 0))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0.25, 0)
+        , maxUV: vec2f(0.5, 0.25)
+        #, texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(300, 0))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0.5, 0)
+        , maxUV: vec2f(0.75, 0.25)
+        #, texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(450, 0))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0.75, 0)
+        , maxUV: vec2f(1.0, 0.25)
+        #, texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(0, 150))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0, 0.25)
+        , maxUV: vec2f(0.25, 0.5)
+        #, texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(150, 150))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0.25, 0.25)
+        , maxUV: vec2f(0.5, 0.5)
+        #, texture: atlas
+    )
+)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(300, 150))
+    , SpriteComponent(
+        dimensions: vec2f(128, 128)
+        , minUV: vec2f(0.5, 0.25)
+        , maxUV: vec2f(0.75, 0.5)
+        #, texture: atlas
+    )
+)
+
 var
     evt: sdl2.Event
     cameraPosition = vec3f(0.0'f32)
@@ -99,16 +182,7 @@ block GameLoop:
             cameraPosition.y += cameraSpeed * dt
         
         var renderList = RdRenderList(
-            sprites: @[
-                RdSpriteRenderRequest(x: 0, y: -150, w: 128, h: 128, minUV: vec2f(0, 0), maxUV: vec2f(0.25, 0.25), texture: atlas)
-                , RdSpriteRenderRequest(x: 0, y: 0, w: 128, h: 128, minUV: vec2f(0, 0), maxUV: vec2f(0.25, 0.25))
-                , RdSpriteRenderRequest(x: 150, y: 0, w: 128, h: 128, minUV: vec2f(0.25, 0), maxUV: vec2f(0.5, 0.25))
-                , RdSpriteRenderRequest(x: 300, y: 0, w: 128, h: 128, minUV: vec2f(0.5, 0), maxUV: vec2f(0.75, 0.25))
-                , RdSpriteRenderRequest(x: 450, y: 0, w: 128, h: 128, minUV: vec2f(0.75, 0), maxUV: vec2f(1, 0.25))
-                , RdSpriteRenderRequest(x: 0, y: 150, w: 128, h: 128, minUV: vec2f(0, 0.25), maxUV: vec2f(0.25, 0.5))
-                , RdSpriteRenderRequest(x: 150, y: 150, w: 128, h: 128, minUV: vec2f(0.25, 0.25), maxUV: vec2f(0.5, 0.5))
-                , RdSpriteRenderRequest(x: 300, y: 150, w: 128, h: 128, minUV: vec2f(0.5, 0.25), maxUV: vec2f(0.75, 0.5))
-            ]
+            sprites: spriteRenderSystem(world)
             , text: @[
                 RdBitmapFontRenderRequest(x: 0, y: 0, text: "Bitmap font render test.\nHello, Vulkan!", font: font)
             ])
