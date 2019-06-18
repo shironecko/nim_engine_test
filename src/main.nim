@@ -99,7 +99,8 @@ block GameLoop:
                 , RdSpriteRenderRequest(x: 300, y: 0, w: 128, h: 128, minUV: vec2f(0.5, 0), maxUV: vec2f(0.75, 0.25))
                 , RdSpriteRenderRequest(x: 450, y: 0, w: 128, h: 128, minUV: vec2f(0.75, 0), maxUV: vec2f(1, 0.25))
                 , RdSpriteRenderRequest(x: 0, y: 150, w: 128, h: 128, minUV: vec2f(0, 0.25), maxUV: vec2f(0.25, 0.5))
-                , RdSpriteRenderRequest(x: 0, y: 300, w: 128, h: 128, minUV: vec2f(0.25, 0.25), maxUV: vec2f(0.5, 0.5))
+                , RdSpriteRenderRequest(x: 150, y: 150, w: 128, h: 128, minUV: vec2f(0.25, 0.25), maxUV: vec2f(0.5, 0.5))
+                , RdSpriteRenderRequest(x: 300, y: 150, w: 128, h: 128, minUV: vec2f(0.5, 0.25), maxUV: vec2f(0.75, 0.5))
             ])
         rdRenderAndPresent(renderContext, cameraPosition, renderList)
 

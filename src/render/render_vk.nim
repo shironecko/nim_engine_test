@@ -4,14 +4,13 @@ import sugar
 import glm
 import sdl2
 import vulkan_wrapper
-import debug_font
 import ../log
 import ../utility
 
 const
     MAX_SPRITES_PER_FRAME = 1000
     VERTEX_BUFFER_SIZE = MAX_SPRITES_PER_FRAME * 6
-    INVALID_TEXTURE_ID = -1
+    INVALID_RESOURCE_ID = -1
     MAX_TEXTURES_LOADED = 512
     DEBUG_FONT_TEXTURE_ID = 0
 
@@ -27,6 +26,8 @@ type
         vulkanData: VkwPhysicalDeviceDescription
 
     RdTexture* = object # a texture is actually just an index into descriptor sets array
+        id: int
+    RdBitmapFont* = object
         id: int
     RdSpriteRenderRequest* = object
         x*, y*: float32
@@ -257,6 +258,7 @@ proc rdGetCompatiblePhysicalDevices*(context: RdContext): seq[RdPhysicalDevice] 
         )
 
 proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture]
+proc rdLoadBitmapFonts*(context: var RdContext, paths: seq[string]): seq[RdBitmapFont]
 
 proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDevice) =
     check context.state == RdContextState.preInitialized
@@ -856,11 +858,10 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
         )
     vkCheck vkCreateGraphicsPipelines(context.device, vkNullHandle, 1, unsafeAddr pipelineCreateInfo, nil, addr context.pipeline)
 
-proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture] =
+proc rdLoadTextures(context: var RdContext, textures: seq[VkwTextureWithSampler]): seq[RdTexture] =
     check context.state == RdContextState.initialized
 
     let 
-        textures = vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence, paths)
         descriptorSetLayouts = repeat(context.textureDescriptorSetAllocationData.layout, textures.len())
         descriptorAllocateInfo = VkDescriptorSetAllocateInfo(
             sType: VkStructureType.descriptorSetAllocateInfo
@@ -903,6 +904,9 @@ proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture]
     for descriptorSet in textureDescriptorSets:
         context.textureDescriptorSets.add descriptorSet
         result.add RdTexture(id: context.textureDescriptorSets.len() - 1)
+
+proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture] =
+    rdLoadTextures(context, vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence, paths))
 
 proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: RdRenderList) =
     check context.state == RdContextState.initialized
