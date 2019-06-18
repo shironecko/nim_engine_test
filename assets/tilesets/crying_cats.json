@@ -1,0 +1,14 @@
+{ "columns":4,
+ "image":"..\/textures\/debug_atlas_small.bmp",
+ "imageheight":128,
+ "imagewidth":128,
+ "margin":0,
+ "name":"crying_cats",
+ "spacing":0,
+ "tilecount":16,
+ "tiledversion":"1.2.4",
+ "tileheight":32,
+ "tilewidth":32,
+ "type":"tileset",
+ "version":1.2
+}
