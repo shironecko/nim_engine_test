@@ -436,8 +436,11 @@ proc vkwLoadTextureSurface(path: string, desiredPixelFormat: uint32): SurfacePtr
 type
     VkwTexturePixelsFormat* {.pure.} = enum
         RGB24
+        RGBAFloat32
     VkwTexturePixelRGB24* {.packed.} = object
         r, g, b: uint8
+    VkwTexturePixelRGBAFloat32* {.packed.} = object
+        r, g, b, a: float32
     VkwTexturePixels* = object
         format*: VkwTexturePixelsFormat
         w*, h*: uint32
@@ -479,16 +482,28 @@ proc vkwLoadColorTextures*(
                 r, g, b, a: float32
         var textureMappedMemory: ptr UncheckedArray[VulkanTexturePixel]
         vkCheck vkMapMemory(device, texture.memory, 0, high uint64, 0, cast[ptr pointer](addr textureMappedMemory))
-        # TODO: actual support for different formats
-        var texturePixels = cast[ptr UncheckedArray[VkwTexturePixelRGB24]](texturePixelsData.pixelsData)
-        for i in 0..<(texturePixelsData.w * texturePixelsData.h):
-            let p = texturePixels[i]
-            textureMappedMemory[i] = VulkanTexturePixel(
-                r: float32(p.r) / 256.0'f32
-                , g: float32(p.g) / 256.0'f32
-                , b: float32(p.b) / 256.0'f32
-                , a: float32(256.0'f32) / 256.0'f32 # TODO: figure this stuff out
-            )
+        # TODO: tidy up
+        case texturePixelsData.format:
+            of VkwTexturePixelsFormat.RGB24:
+                var texturePixels = cast[ptr UncheckedArray[VkwTexturePixelRGB24]](texturePixelsData.pixelsData)
+                for i in 0..<(texturePixelsData.w * texturePixelsData.h):
+                    let p = texturePixels[i]
+                    textureMappedMemory[i] = VulkanTexturePixel(
+                        r: float32(p.r) / 256.0'f32
+                        , g: float32(p.g) / 256.0'f32
+                        , b: float32(p.b) / 256.0'f32
+                        , a: float32(256.0'f32) / 256.0'f32 # TODO: figure this stuff out
+                    )
+            of VkwTexturePixelsFormat.RGBAFloat32:
+                var texturePixels = cast[ptr UncheckedArray[VkwTexturePixelRGBAFloat32]](texturePixelsData.pixelsData)
+                for i in 0..<(texturePixelsData.w * texturePixelsData.h):
+                    let p = texturePixels[i]
+                    textureMappedMemory[i] = VulkanTexturePixel(
+                        r: p.r
+                        , g: p.g
+                        , b: p.b
+                        , a: p.a
+                    )
 
         let textureMemoryRange = VkMappedMemoryRange(
             sType: VkStructureType.mappedMemoryRange

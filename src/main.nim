@@ -50,6 +50,11 @@ let selectedRenderDevice = renderDevices[0]
 gLog LInfo, &"Selected render device: {selectedRenderDevice.name}"
 
 rdInitialize(renderContext, selectedRenderDevice)
+let
+    fonts = rdLoadBitmapFonts(renderContext, @["../assets/fonts/debug_font.bff"])
+    font = fonts[0]
+    atlases = rdLoadTextures(renderContext, @["../assets/textures/debug_atlas_copy.bmp"])
+    atlas = atlases[0]
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
@@ -93,14 +98,19 @@ block GameLoop:
         if keys[int SDL_SCANCODE_S] == 1:
             cameraPosition.y += cameraSpeed * dt
         
-        var renderList = RdRenderList(sprites: @[
-                RdSpriteRenderRequest(x: 0, y: 0, w: 128, h: 128, minUV: vec2f(0, 0), maxUV: vec2f(0.25, 0.25))
+        var renderList = RdRenderList(
+            sprites: @[
+                RdSpriteRenderRequest(x: 0, y: -150, w: 128, h: 128, minUV: vec2f(0, 0), maxUV: vec2f(0.25, 0.25), texture: atlas)
+                , RdSpriteRenderRequest(x: 0, y: 0, w: 128, h: 128, minUV: vec2f(0, 0), maxUV: vec2f(0.25, 0.25))
                 , RdSpriteRenderRequest(x: 150, y: 0, w: 128, h: 128, minUV: vec2f(0.25, 0), maxUV: vec2f(0.5, 0.25))
                 , RdSpriteRenderRequest(x: 300, y: 0, w: 128, h: 128, minUV: vec2f(0.5, 0), maxUV: vec2f(0.75, 0.25))
                 , RdSpriteRenderRequest(x: 450, y: 0, w: 128, h: 128, minUV: vec2f(0.75, 0), maxUV: vec2f(1, 0.25))
                 , RdSpriteRenderRequest(x: 0, y: 150, w: 128, h: 128, minUV: vec2f(0, 0.25), maxUV: vec2f(0.25, 0.5))
                 , RdSpriteRenderRequest(x: 150, y: 150, w: 128, h: 128, minUV: vec2f(0.25, 0.25), maxUV: vec2f(0.5, 0.5))
                 , RdSpriteRenderRequest(x: 300, y: 150, w: 128, h: 128, minUV: vec2f(0.5, 0.25), maxUV: vec2f(0.75, 0.5))
+            ]
+            , text: @[
+                RdBitmapFontRenderRequest(x: 0, y: 0, text: "Bitmap font render test.\nHello, Vulkan!", font: font)
             ])
         rdRenderAndPresent(renderContext, cameraPosition, renderList)
 

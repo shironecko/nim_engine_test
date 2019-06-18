@@ -1,3 +1,5 @@
+import algorithm
+import math
 import sequtils
 import strformat
 import sugar
@@ -34,8 +36,13 @@ type
         w*, h*: float32
         minUV*, maxUV*: Vec2f
         texture*: RdTexture
+    RdBitmapFontRenderRequest* = object
+        x*, y*: float32
+        text*: string
+        font*: RdBitmapFont
     RdRenderList* = object
         sprites*: seq[RdSpriteRenderRequest]
+        text*: seq[RdBitmapFontRenderRequest]
     
     RdContextState {.pure.} = enum
         uninitialized, preInitialized, initialized
@@ -50,7 +57,7 @@ type
         bitsPerPixel: uint8
         baseCharacter: uint8
         characterWidth: array[256, uint8]
-    RdBitmapFontTexturePixel* = object
+    RdBitmapFontTexturePixel* {.packed.} = object
         r, g, b, a: float32
     RdBitmapFontData = object
         cellWidth, cellHeight: uint32
@@ -102,11 +109,12 @@ proc rdLoadBitmapFontData(path: string): RdBitmapFontData =
     result.cellWidth = fontHeader.cellWidth
     result.cellHeight = fontHeader.cellHeight
     result.baseCharacter = fontHeader.baseCharacter
+    vkLog LTrace, $result
     result.pixels.setLen(pixelCount)
     for i in 0..<pixelCount:
         let pixel =
-            if fontPixels[i] >= 127'u8: RdBitmapFontTexturePixel(r:1.0'f32, g:1.0'f32, b:1.0'f32, a:1.0'f32)
-            else: RdBitmapFontTexturePixel(r:0.0'f32, g:0.0'f32, b:0.0'f32, a:1.0'f32)
+            if fontPixels[i] >= 1'u8: RdBitmapFontTexturePixel(r:0.0'f32, g:1.0'f32, b:1.0'f32, a:1.0'f32)
+            else: RdBitmapFontTexturePixel(r:0.0'f32, g:1.0'f32, b:0.0'f32, a:1.0'f32)
         result.pixels.add pixel
 
 type
@@ -609,7 +617,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             textureDescriptorPoolSizes = @[
                 VkDescriptorPoolSize(
                     descriptorType: VkDescriptorType.combinedImageSampler
-                    , descriptorCount: 1
+                    , descriptorCount: MAX_TEXTURES_LOADED
                 )
             ]
             descriptorPoolCreateInfo = VkDescriptorPoolCreateInfo(
@@ -908,6 +916,23 @@ proc rdLoadTextures(context: var RdContext, textures: seq[VkwTextureWithSampler]
 proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture] =
     rdLoadTextures(context, vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence, paths))
 
+proc rdLoadBitmapFonts*(context: var RdContext, paths: seq[string]): seq[RdBitmapFont] =
+    for path in paths:
+        var
+            fontData = rdLoadBitmapFontData(path)
+            texturesWithSampler = vkwLoadColorTextures(
+                context.device
+                , context.physicalDeviceMemoryProperties
+                , context.commandBuffer
+                , context.queue
+                , context.submitFence
+                , @["../assets/fonts/debug_font.bmp"])
+            textures = rdLoadTextures(context, texturesWithSampler)
+        fontData.texture = textures[0]
+        context.bitmapFonts.add(fontData)
+        result.add(RdBitmapFont(id: context.bitmapFonts.len() - 1))
+
+
 proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: RdRenderList) =
     check context.state == RdContextState.initialized
 
@@ -935,11 +960,53 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
         copyMem(memory, shaderMVP.caddr, sizeof(float32) * 16)
     )
     
+    type
+        RenderBatch = object
+            offset, primitiveCount: uint32
+            texture: RdTexture
+    var spriteDrawRequests = renderList.sprites
+    for text in renderList.text:
+        var 
+            fontData = context.bitmapFonts[text.font.id]
+            cellsPerRow = uint32(float32(fontData.textureWidth) / float32(fontData.cellWidth))
+            glyphPos = vec2f(text.x, text.y)
+        for glyph in text.text:
+            if glyph == '\n':
+                glyphPos.x = text.x
+                glyphPos.y += float32 fontData.cellHeight
+                continue
+            let
+                glyphIndex = uint32(glyph) - fontData.baseCharacter
+                glyphRow = uint32(float32(glyphIndex) / float32(cellsPerRow))
+                glyphCol = glyphIndex - glyphRow * cellsPerRow
+                cellU = float32(fontData.cellWidth) / float32(fontData.textureWidth)
+                cellV = float32(fontData.cellHeight) / float32(fontData.textureHeight)
+                cellUV = vec2f(cellU, cellV)
+                glyphMinUV = vec2f(cellU * float32 glyphCol, cellV * float32 glyphRow)
+            
+            spriteDrawRequests.add(RdSpriteRenderRequest(
+                x: glyphPos.x
+                , y: glyphPos.y
+                , w: float32 fontData.cellWidth
+                , h: float32 fontData.cellHeight
+                , minUV: glyphMinUV
+                , maxUV: glyphMinUV + cellUV
+                , texture: fontData.texture
+            ))
+            glyphPos.x += float32 fontData.cellWidth
+
+    spriteDrawRequests.sort(proc (a, b: RdSpriteRenderRequest): int = a.texture.id - b.texture.id)
+    var renderBatches: seq[RenderBatch]
     vkwWithMemory(context.device, context.vertexBuffer.memory, proc(memory: pointer) =
         var vertices = cast[ptr UncheckedArray[Vertex]](memory)
-        for i, sprite in renderList.sprites:
-            var model = mat4f(1.0).translate(sprite.x, sprite.y, 0.0).scale(sprite.w, sprite.h, 1.0).transpose()
+        var currentBatch = RenderBatch(offset: 0, primitiveCount: 0, texture: spriteDrawRequests[0].texture)
+        for i, sprite in spriteDrawRequests:
             let offset = i * 6
+            if currentBatch.texture != sprite.texture:
+                renderBatches.add(currentBatch)
+                currentBatch = RenderBatch(offset: uint32 offset, primitiveCount: 0, texture: sprite.texture)
+            
+            var model = mat4f(1.0).translate(sprite.x, sprite.y, 0.0).scale(sprite.w, sprite.h, 1.0).transpose()
             let plane = @[
                 newVertex(vec4f(x = -0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.minUV.y),
                 newVertex(vec4f(x =  0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.minUV.y),
@@ -952,6 +1019,10 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
             vertices[offset + 3] = plane[1]
             vertices[offset + 4] = plane[3]
             vertices[offset + 5] = plane[2]
+
+            currentBatch.primitiveCount += 6
+        
+        renderBatches.add(currentBatch)
     )
 
     var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
@@ -1043,12 +1114,15 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
         scissor = renderArea
     vkCheck vkCmdSetViewport(context.commandBuffer, 0, 1, unsafeAddr viewport)
     vkCheck vkCmdSetScissor(context.commandBuffer, 0, 1, unsafeAddr scissor)
-    vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 0, 1, addr context.descriptorSet, 0, nil)
-    vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 1, 1, addr context.textureDescriptorSets[0], 0, nil)
 
     var offsets: VkDeviceSize
     vkCheck vkCmdBindVertexBuffers(context.commandBuffer, 0, 1, addr context.vertexBuffer.buffer, addr offsets)
-    vkCheck vkCmdDraw(context.commandBuffer, uint32 renderList.sprites.len() * 6, 1, 0, 0)
+
+    vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 0, 1, addr context.descriptorSet, 0, nil)
+    for renderBatch in renderBatches:
+        vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 1, 1, addr context.textureDescriptorSets[renderBatch.texture.id], 0, nil)
+        vkCheck vkCmdDraw(context.commandBuffer, renderBatch.primitiveCount, 1, renderBatch.offset, 0)
+
 
     vkCheck vkCmdEndRenderPass(context.commandBuffer)
 
