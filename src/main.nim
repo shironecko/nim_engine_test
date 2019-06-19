@@ -11,6 +11,7 @@ import render/render_vk
 import utility
 import ecs
 import tiled_integration
+import assets
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
@@ -53,10 +54,9 @@ gLog LInfo, &"Selected render device: {selectedRenderDevice.name}"
 
 rdInitialize(renderContext, selectedRenderDevice)
 let
-    fonts = rdLoadBitmapFonts(renderContext, @["../assets/fonts/debug_font.bff"])
-    font = fonts[0]
-    atlases = rdLoadTextures(renderContext, @["../assets/textures/debug_atlas_copy.bmp"])
-    atlas = atlases[0]
+    #fonts = rdLoadBitmapFonts(renderContext, @["../assets/fonts/debug_font.bff"])
+    #font = fonts[0]
+    atlas = asLoadColorTexture("../assets/textures/roguelikeSheet_transparent.png", renderContext)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
@@ -81,7 +81,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0, 0)
         , maxUV: vec2f(0.25, 0.25)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 discard addEntity(
@@ -91,7 +91,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0.25, 0)
         , maxUV: vec2f(0.5, 0.25)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 discard addEntity(
@@ -101,7 +101,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0.5, 0)
         , maxUV: vec2f(0.75, 0.25)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 discard addEntity(
@@ -111,7 +111,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0.75, 0)
         , maxUV: vec2f(1.0, 0.25)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 discard addEntity(
@@ -121,7 +121,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0, 0.25)
         , maxUV: vec2f(0.25, 0.5)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 discard addEntity(
@@ -131,7 +131,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0.25, 0.25)
         , maxUV: vec2f(0.5, 0.5)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 discard addEntity(
@@ -141,7 +141,7 @@ discard addEntity(
         dimensions: vec2f(128, 128)
         , minUV: vec2f(0.5, 0.25)
         , maxUV: vec2f(0.75, 0.5)
-        #, texture: atlas
+        , texture: atlas
     )
 )
 
@@ -184,9 +184,10 @@ block GameLoop:
         
         var renderList = RdRenderList(
             sprites: spriteRenderSystem(world)
-            , text: @[
-                RdBitmapFontRenderRequest(x: 0, y: 0, text: "Bitmap font render test.\nHello, Vulkan!", font: font)
-            ])
+            #, text: @[
+            #    RdBitmapFontRenderRequest(x: 0, y: 0, text: "Bitmap font render test.\nHello, Vulkan!", font: font)
+            #]
+        )
         rdRenderAndPresent(renderContext, cameraPosition, renderList)
 
 destroyWindow(window)

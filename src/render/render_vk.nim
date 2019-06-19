@@ -1160,7 +1160,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
 
     vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 0, 1, addr context.descriptorSet, 0, nil)
     for renderBatch in renderBatches:
-        vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 1, 1, addr context.textureDescriptorSets[renderBatch.texture.id], 0, nil)
+        vkCheck vkCmdBindDescriptorSets(context.commandBuffer, VkPipelineBindPoint.graphics, context.pipelineLayout, 1, 1, addr context.textures[renderBatch.texture.id].descriptorSet, 0, nil)
         vkCheck vkCmdDraw(context.commandBuffer, renderBatch.primitiveCount, 1, renderBatch.offset, 0)
 
 
