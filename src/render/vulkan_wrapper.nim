@@ -412,39 +412,37 @@ proc vkwTransitionImageLayout*(
     vkCheck vkResetCommandBuffer(commandBuffer, 0)
 
 type
-    VkwTexture* = object
-        image*: VkImage
-        view*: VkImageView
-        memory*: VkDeviceMemory
-    VkwTextureWithSampler* = object
-        texture*: VkwTexture
-        sampler*: VkSampler
+    VkwImageLayoutTransitionType* {.pure.} = enum
+        ColorTextureInitialization
 
-proc vkwLoadTextureSurface(path: string, desiredPixelFormat: uint32): SurfacePtr =
-    var texturePixelsData = loadBMP(path)
-    sdlCheck texturePixelsData != nil, &"Failed to load texture surface: {path}!"
-
-    if texturePixelsData.format.format != desiredPixelFormat:
-        var convertedTextureSurface = convertSurfaceFormat(texturePixelsData, desiredPixelFormat, 0)
-        sdlCheck convertedTextureSurface != nil, &"Failed to convert texture surface at {path} to pixel format of {desiredPixelFormat}!"
-        sdlCheck convertedTextureSurface.format.format == desiredPixelFormat, &"Failed to convert texture surface at {path} to pixel format of {desiredPixelFormat}! Format after conversion: {convertedTextureSurface.format.format}."
-        freeSurface(texturePixelsData)
-        convertedTextureSurface
-    else:
-        texturePixelsData
+proc vkwTransitionImageLayout*(
+    device: VkDevice
+    , image: VkImage
+    , commandBuffer: var VkCommandBuffer
+    , queue: VkQueue
+    , fence: var VkFence
+    , transitionType: VkwImageLayoutTransitionType
+    ) =
+    case transitionType:
+        of ColorTextureInitialization:
+            vkwTransitionImageLayout(
+                device = device
+                , image = image
+                , commandBuffer = commandBuffer
+                , queue = queue
+                , fence = fence
+                , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
+                , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
+                , oldLayout = VkImageLayout.preinitialized
+                , newLayout = VkImageLayout.shaderReadOnlyOptimal
+                , srcStageMask = uint32 VkPipelineStageFlagBits.host
+                , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
+                , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
+            )
 
 type
-    VkwTexturePixelsFormat* {.pure.} = enum
-        RGB24
-        RGBAFloat32
-    VkwTexturePixelRGB24* {.packed.} = object
-        r, g, b: uint8
     VkwTexturePixelRGBAFloat32* {.packed.} = object
         r, g, b, a: float32
-    VkwTexturePixels* = object
-        format*: VkwTexturePixelsFormat
-        w*, h*: uint32
-        pixelsData*: ptr UncheckedArray[uint8]
 
 proc vkwCreateImage*(device: VkDevice, deviceMemoryProperties: VkPhysicalDeviceMemoryProperties, width: uint32, height: uint32
         , format = VkFormat.r32g32b32a32SFloat
@@ -541,194 +539,6 @@ proc vkwCreateImageDescriptorSet*(
         )
 
     vkCheck vkUpdateDescriptorSets(device, 1, unsafeAddr writeDescriptor, 0, nil)
-
-type
-    VkwImageLayoutTransitionType* {.pure.} = enum
-        ColorTextureInitialization
-
-proc vkwTransitionImageLayout*(
-    device: VkDevice
-    , image: VkImage
-    , commandBuffer: var VkCommandBuffer
-    , queue: VkQueue
-    , fence: var VkFence
-    , transitionType: VkwImageLayoutTransitionType
-    ) =
-    case transitionType:
-        of ColorTextureInitialization:
-            vkwTransitionImageLayout(
-                device = device
-                , image = image
-                , commandBuffer = commandBuffer
-                , queue = queue
-                , fence = fence
-                , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
-                , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
-                , oldLayout = VkImageLayout.preinitialized
-                , newLayout = VkImageLayout.shaderReadOnlyOptimal
-                , srcStageMask = uint32 VkPipelineStageFlagBits.host
-                , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
-                , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
-            )
-
-proc vkwLoadColorTextures*(
-    device: VkDevice
-    , memoryProperties: VkPhysicalDeviceMemoryProperties
-    , commandBuffer: var VkCommandBuffer
-    , queue: VkQueue
-    , fence: var VkFence
-    , texturePixelsDataSequence: seq[VkwTexturePixels]
-): seq[VkwTextureWithSampler] =
-    for texturePixelsData in texturePixelsDataSequence:
-        var texture: VkwTexture
-
-        let textureCreateInfo = VkImageCreateInfo(
-            sType: VkStructureType.imageCreateInfo
-            , imageType: VkImageType.twoDee
-            , format: VkFormat.r32g32b32a32SFloat
-            , extent: VkExtent3D(width: uint32 texturePixelsData.w, height: uint32 texturePixelsData.h, depth: 1)
-            , mipLevels: 1
-            , arrayLayers: 1
-            , samples: VkSampleCountFlagBits.one
-            , tiling: VkImageTiling.linear
-            , usage: uint32 VkImageUsageFlagBits.sampled
-            , sharingMode: VkSharingMode.exclusive
-            , initialLayout: VkImageLayout.preinitialized
-        )
-        
-        vkCheck vkCreateImage(device, unsafeAddr textureCreateInfo, nil, addr texture.image)
-        var imageMemoryRequirements: VkMemoryRequirements
-        vkCheck vkGetImageMemoryRequirements(device, texture.image, addr imageMemoryRequirements)
-        texture.memory = vkwAllocateDeviceMemory(device, memoryProperties, imageMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
-        vkCheck vkBindImageMemory(device, texture.image, texture.memory, 0)
-
-        type
-            VulkanTexturePixel {.packed.} = object
-                r, g, b, a: float32
-        var textureMappedMemory: ptr UncheckedArray[VulkanTexturePixel]
-        vkCheck vkMapMemory(device, texture.memory, 0, high uint64, 0, cast[ptr pointer](addr textureMappedMemory))
-        # TODO: tidy up
-        case texturePixelsData.format:
-            of VkwTexturePixelsFormat.RGB24:
-                var texturePixels = cast[ptr UncheckedArray[VkwTexturePixelRGB24]](texturePixelsData.pixelsData)
-                for i in 0..<(texturePixelsData.w * texturePixelsData.h):
-                    let p = texturePixels[i]
-                    textureMappedMemory[i] = VulkanTexturePixel(
-                        r: float32(p.r) / 256.0'f32
-                        , g: float32(p.g) / 256.0'f32
-                        , b: float32(p.b) / 256.0'f32
-                        , a: float32(256.0'f32) / 256.0'f32 # TODO: figure this stuff out
-                    )
-            of VkwTexturePixelsFormat.RGBAFloat32:
-                var texturePixels = cast[ptr UncheckedArray[VkwTexturePixelRGBAFloat32]](texturePixelsData.pixelsData)
-                for i in 0..<(texturePixelsData.w * texturePixelsData.h):
-                    let p = texturePixels[i]
-                    textureMappedMemory[i] = VulkanTexturePixel(
-                        r: p.r
-                        , g: p.g
-                        , b: p.b
-                        , a: p.a
-                    )
-
-        let textureMemoryRange = VkMappedMemoryRange(
-            sType: VkStructureType.mappedMemoryRange
-            , memory: texture.memory
-            , offset: 0
-            , size: high uint64
-        )
-        vkCheck vkFlushMappedMemoryRanges(device, 1, unsafeAddr textureMemoryRange)
-        vkCheck vkUnmapMemory(device, texture.memory)
-
-        vkwTransitionImageLayout(
-            device = device
-            , image = texture.image
-            , commandBuffer = commandBuffer
-            , queue = queue
-            , fence = fence
-            , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
-            , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
-            , oldLayout = VkImageLayout.preinitialized
-            , newLayout = VkImageLayout.shaderReadOnlyOptimal
-            , srcStageMask = uint32 VkPipelineStageFlagBits.host
-            , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
-            , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
-        )
-
-        let vkTextureImageViewCreateInfo = VkImageViewCreateInfo(
-            sType: VkStructureType.imageViewCreateInfo
-            , image: texture.image
-            , viewType: VkImageViewType.twoDee
-            , format: VkFormat.r32g32b32a32SFloat
-            , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
-            , subresourceRange: VkImageSubresourceRange(
-                aspectMask: uint32 VkImageAspectFlagBits.color
-                , baseMipLevel: 0
-                , levelCount: 1
-                , baseArrayLayer: 0
-                , layerCount: 1
-            )
-        )
-        vkCheck vkCreateImageView(device, unsafeAddr vkTextureImageViewCreateInfo, nil, addr texture.view)
-
-        let samplerCreateInfo = VkSamplerCreateInfo(
-            sType: VkStructureType.samplerCreateInfo
-            , magFilter: VkFilter.linear
-            , minFilter: VkFilter.linear
-            , mipmapMode: VkSamplerMipmapMode.linear
-            , addressModeU: VkSamplerAddressMode.clampToEdge
-            , addressModeV: VkSamplerAddressMode.clampToEdge
-            , addressModeW: VkSamplerAddressMode.clampToEdge
-            , mipLodBias: 0
-            , anisotropyEnable: vkFalse
-            , minLod: 0
-            , maxLod: 5
-            , borderColor: VkBorderColor.floatTransparentBlack
-            , unnormalizedCoordinates: vkFalse
-        )
-        var sampler: VkSampler
-        vkCheck vkCreateSampler(device, unsafeAddr samplerCreateInfo, nil, addr sampler)
-
-        result.add(VkwTextureWithSampler(texture: texture, sampler: sampler))
-
-
-proc vkwLoadColorTextures*(
-    device: VkDevice
-    , memoryProperties: VkPhysicalDeviceMemoryProperties
-    , commandBuffer: var VkCommandBuffer
-    , queue: VkQueue
-    , fence: var VkFence
-    , texturePaths: seq[string]
-    ): seq[VkwTextureWithSampler] =
-    var sdlSurfacesToFree: seq[SurfacePtr]
-    let texturePixelsDataSequence = texturePaths.mapIt:
-        let desiredTextureSurfacePixelFormat = SDL_PIXELFORMAT_RGB24
-        var sdlSurface = vkwLoadTextureSurface(it, desiredTextureSurfacePixelFormat)
-        sdlSurfacesToFree.add sdlSurface
-        VkwTexturePixels(
-            format: VkwTexturePixelsFormat.RGB24
-            , w: uint32 sdlSurface.w
-            , h: uint32 sdlSurface.h
-            , pixelsData: cast[ptr UncheckedArray[uint8]](sdlSurface.pixels)
-        )
-
-    result = vkwLoadColorTextures(device, memoryProperties, commandBuffer, queue, fence, texturePixelsDataSequence)
-    for surface in sdlSurfacesToFree: freeSurface(surface)
-
-
-proc vkwFreeTexture*(
-        device: VkDevice
-        , texture: VkwTexture
-    ) =
-    vkCheck vkDestroyImageView(device, texture.view, nil)
-    vkCheck vkDestroyImage(device, texture.image, nil)
-    vkCheck vkFreeMemory(device, texture.memory, nil)
-
-proc vkwFreeTextureWithSampler*(
-        device: VkDevice
-        , textureWithSampler: VkwTextureWithSampler
-    ) =
-    vkCheck vkDestroySampler(device, textureWithSampler.sampler, nil)
-    vkwFreeTexture(device, textureWithSampler.texture)
 
 type
     VkwBuffer* = object

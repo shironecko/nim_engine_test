@@ -95,9 +95,9 @@ type
         physicalDeviceProperties: RdPhysicalDevice
         device: VkDevice
         swapchain: VkSwapchainKHR
-        swapchainTextures: seq[VkwTexture]
+        swapchainTextures: seq[RdTextureData]
         framebuffers: seq[VkFramebuffer]
-        depthImage: VkwTexture
+        depthImage: RdTextureData
         queue: VkQueue
         commandPool: VkCommandPool
         commandBuffer: VkCommandBuffer
@@ -305,9 +305,6 @@ proc rdGetCompatiblePhysicalDevices*(context: RdContext): seq[RdPhysicalDevice] 
             )
         )
 
-proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture]
-proc rdLoadBitmapFonts*(context: var RdContext, paths: seq[string]): seq[RdBitmapFont]
-
 proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDevice) =
     check context.state == RdContextState.preInitialized
     context.state = RdContextState.initialized
@@ -453,7 +450,7 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
     )
     vkCheck vkAllocateCommandBuffers(context.device, unsafeAddr commandBufferAllocateInfo, addr context.commandBuffer)
 
-    context.swapchainTextures = vkGetSwapchainImagesKHR(context.device, context.swapchain).mapIt VkwTexture(image: it, memory: vkNullHandle)
+    context.swapchainTextures = vkGetSwapchainImagesKHR(context.device, context.swapchain).mapIt RdTextureData(image: it, memory: vkNullHandle)
     var swapchainTextureTransitionFlags = repeat(false, context.swapchainTextures.len())
     while swapchainTextureTransitionFlags.anyIt(not it):
         var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
@@ -669,12 +666,6 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , pPoolSizes: unsafeAddr textureDescriptorPoolSizes[0]
             )
         vkCheck vkCreateDescriptorPool(context.device, unsafeAddr descriptorPoolCreateInfo, nil, addr context.textureDescriptorSetAllocationData.pool)
-    
-    let 
-        debugTextureDescriptorIDs = rdLoadTextures(context, @["debug_atlas.bmp"])
-        debugTextureDescriptorID = debugTextureDescriptorIDs[0]
-    check debugTextureDescriptorIDs.len() == 1
-    check debugTextureDescriptorID.id == DEBUG_FONT_TEXTURE_ID
 
     context.uniforms = vkwAllocateBuffer(
         context.device
@@ -907,73 +898,6 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , basePipelineIndex: 0
         )
     vkCheck vkCreateGraphicsPipelines(context.device, vkNullHandle, 1, unsafeAddr pipelineCreateInfo, nil, addr context.pipeline)
-
-proc rdLoadTextures(context: var RdContext, textures: seq[VkwTextureWithSampler]): seq[RdTexture] =
-    check context.state == RdContextState.initialized
-
-    let 
-        descriptorSetLayouts = repeat(context.textureDescriptorSetAllocationData.layout, textures.len())
-        descriptorAllocateInfo = VkDescriptorSetAllocateInfo(
-            sType: VkStructureType.descriptorSetAllocateInfo
-            , descriptorPool: context.textureDescriptorSetAllocationData.pool
-            , descriptorSetCount: uint32 descriptorSetLayouts.len()
-            , pSetLayouts: unsafeAddr descriptorSetLayouts[0]
-        )
-    var textureDescriptorSets: seq[VkDescriptorSet]
-    textureDescriptorSets.setLen(textures.len())
-    vkCheck vkAllocateDescriptorSets(context.device, unsafeAddr descriptorAllocateInfo, addr textureDescriptorSets[0])
-
-    type
-        ImageWriteInfo = object
-            imageInfos: seq[VkDescriptorImageInfo]
-            writeDescriptors: seq[VkWriteDescriptorSet]
-    var imageWriteInfo: ImageWriteInfo
-    for i in 0..<textures.len():
-        let
-            texture = textures[i]
-            descriptorSet = textureDescriptorSets[i]
-        imageWriteInfo.imageInfos.add VkDescriptorImageInfo(
-            sampler: context.colorTextureSampler
-            , imageView: texture.texture.view
-            , imageLayout: VkImageLayout.shaderReadOnlyOptimal
-        )
-        imageWriteInfo.writeDescriptors.add VkWriteDescriptorSet(
-            sType: VkStructureType.writeDescriptorSet
-            , dstSet: descriptorSet
-            , dstBinding: 0
-            , dstArrayElement: 0
-            , descriptorCount: 1
-            , descriptorType: VkDescriptorType.combinedImageSampler
-            , pImageInfo: addr imageWriteInfo.imageInfos[imageWriteInfo.imageInfos.len() - 1]
-            , pBufferInfo: nil
-            , pTexelBufferView: nil
-        )
-
-    vkCheck vkUpdateDescriptorSets(context.device, uint32 imageWriteInfo.writeDescriptors.len(), addr imageWriteInfo.writeDescriptors[0], 0, nil)
-
-    for descriptorSet in textureDescriptorSets:
-        context.textureDescriptorSets.add descriptorSet
-        result.add RdTexture(id: context.textureDescriptorSets.len() - 1)
-
-proc rdLoadTextures*(context: var RdContext, paths: seq[string]): seq[RdTexture] =
-    rdLoadTextures(context, vkwLoadColorTextures(context.device, context.physicalDeviceMemoryProperties, context.commandBuffer, context.queue, context.submitFence, paths))
-
-proc rdLoadBitmapFonts*(context: var RdContext, paths: seq[string]): seq[RdBitmapFont] =
-    for path in paths:
-        var
-            fontData = rdLoadBitmapFontData(path)
-            texturesWithSampler = vkwLoadColorTextures(
-                context.device
-                , context.physicalDeviceMemoryProperties
-                , context.commandBuffer
-                , context.queue
-                , context.submitFence
-                , @["../assets/fonts/debug_font.bmp"])
-            textures = rdLoadTextures(context, texturesWithSampler)
-        fontData.texture = textures[0]
-        context.bitmapFonts.add(fontData)
-        result.add(RdBitmapFont(id: context.bitmapFonts.len() - 1))
-
 
 proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderList: RdRenderList) =
     check context.state == RdContextState.initialized
