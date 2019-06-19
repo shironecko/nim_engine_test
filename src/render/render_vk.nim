@@ -26,7 +26,24 @@ type
         deviceType*: RdPhysicalDeviceType
         vendor*: RdPhysicalDeviceVendor
         vulkanData: VkwPhysicalDeviceDescription
-
+    
+    RdRawImageFormat* {.pure.} = enum
+        RGBAFloat32 # only one format for now, maybe ever?
+    RdRawImagePixelRGBAFloat32* {.packed.} = object
+        r*, g*, b*, a*: float32
+    RdRawImageData* = object
+        width*, height*: uint32
+        case format*: RdRawImageFormat
+        of RdRawImageFormat.RGBAFloat32:
+            pixelsRGBAFloat32*: seq[RdRawImagePixelRGBAFloat32]
+    
+    RdTextureData = object
+        image: VkImage
+        memory: VkDeviceMemory
+        view: VkImageView
+        sampler: VkSampler
+        descriptorSet: VkDescriptorSet
+    
     RdTexture* = object # a texture is actually just an index into descriptor sets array
         id: int
     RdBitmapFont* = object
@@ -95,6 +112,29 @@ type
         textureDescriptorSetAllocationData: RdDescriptorSetAllocateData
         textureDescriptorSets: seq[VkDescriptorSet]
         bitmapFonts: seq[RdBitmapFontData]
+        textures: seq[RdTextureData]
+        colorTextureSampler: VkSampler
+
+proc rdCreateTexture*(context: var RdContext, imageData: RdRawImageData): RdTexture =
+    check context.state == RdContextState.initialized
+
+    var
+        texture: RdTextureData
+        pixels = case imageData.format:
+            of RdRawImageFormat.RGBAFloat32:
+                imageData.pixelsRGBAFloat32
+    
+    (texture.image, texture.memory) = vkwCreateImage(context.device, context.physicalDeviceMemoryProperties, imageData.width, imageData.height, VkFormat.r32g32b32a32SFloat)
+    vkwWithMemory context.device, texture.memory:
+        copyMem(memoryPtr, addr pixels[0], sizeof(pixels[0]) * pixels.len())
+
+    vkwTransitionImageLayout(context.device, texture.image, context.commandBuffer, context.queue, context.submitFence, VkwImageLayoutTransitionType.ColorTextureInitialization)
+    texture.view = vkwCreateImageView(context.device, texture.image, VkFormat.r32g32b32a32SFloat)
+    texture.descriptorSet = vkwCreateImageDescriptorSet(context.device, context.textureDescriptorSetAllocationData.pool, context.textureDescriptorSetAllocationData.layout, context.colorTextureSampler, texture.view)
+
+    context.textures.add(texture)
+    RdTexture(id: context.textures.len() - 1)
+
 
 proc rdLoadBitmapFontData(path: string): RdBitmapFontData =
     var
@@ -596,6 +636,8 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
     defer:
         vkDestroyShaderModule(context.device, vertexShaderModule, nil)
         vkDestroyShaderModule(context.device, fragmentShaderModule, nil)
+    
+    context.colorTextureSampler = vkwCreateImageSampler(context.device)
 
     block TextureDescriptorSetAllocationDataSetup:
         let
@@ -891,7 +933,7 @@ proc rdLoadTextures(context: var RdContext, textures: seq[VkwTextureWithSampler]
             texture = textures[i]
             descriptorSet = textureDescriptorSets[i]
         imageWriteInfo.imageInfos.add VkDescriptorImageInfo(
-            sampler: texture.sampler
+            sampler: context.colorTextureSampler
             , imageView: texture.texture.view
             , imageLayout: VkImageLayout.shaderReadOnlyOptimal
         )
@@ -956,9 +998,8 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
             vec4(0.0'f32, 0.0'f32, 0.5'f32, 1.0'f32),
         )
     var shaderMVP = (clip * projection * view).transpose()
-    vkwWithMemory(context.device, context.uniforms.memory, proc(memory: pointer) =
-        copyMem(memory, shaderMVP.caddr, sizeof(float32) * 16)
-    )
+    vkwWithMemory context.device, context.uniforms.memory:
+        copyMem(memoryPtr, shaderMVP.caddr, sizeof(float32) * 16)
     
     type
         RenderBatch = object
@@ -997,8 +1038,8 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
 
     spriteDrawRequests.sort(proc (a, b: RdSpriteRenderRequest): int = a.texture.id - b.texture.id)
     var renderBatches: seq[RenderBatch]
-    vkwWithMemory(context.device, context.vertexBuffer.memory, proc(memory: pointer) =
-        var vertices = cast[ptr UncheckedArray[Vertex]](memory)
+    vkwWithMemory context.device, context.vertexBuffer.memory:
+        var vertices = cast[ptr UncheckedArray[Vertex]](memoryPtr)
         var currentBatch = RenderBatch(offset: 0, primitiveCount: 0, texture: spriteDrawRequests[0].texture)
         for i, sprite in spriteDrawRequests:
             let offset = i * 6
@@ -1023,7 +1064,6 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
             currentBatch.primitiveCount += 6
         
         renderBatches.add(currentBatch)
-    )
 
     var presentBeginData = vkwPresentBegin(context.device, context.swapchain, context.commandBuffer)
 

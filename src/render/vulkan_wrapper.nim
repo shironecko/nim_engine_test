@@ -446,6 +446,131 @@ type
         w*, h*: uint32
         pixelsData*: ptr UncheckedArray[uint8]
 
+proc vkwCreateImage*(device: VkDevice, deviceMemoryProperties: VkPhysicalDeviceMemoryProperties, width: uint32, height: uint32
+        , format = VkFormat.r32g32b32a32SFloat
+    ): tuple[image: VkImage, memory: VkDeviceMemory] =
+    let textureCreateInfo = VkImageCreateInfo(
+        sType: VkStructureType.imageCreateInfo
+        , imageType: VkImageType.twoDee
+        , format: format
+        , extent: VkExtent3D(width: width, height: height, depth: 1)
+        , mipLevels: 1
+        , arrayLayers: 1
+        , samples: VkSampleCountFlagBits.one
+        , tiling: VkImageTiling.linear
+        , usage: uint32 VkImageUsageFlagBits.sampled
+        , sharingMode: VkSharingMode.exclusive
+        , initialLayout: VkImageLayout.preinitialized
+    )
+    
+    vkCheck vkCreateImage(device, unsafeAddr textureCreateInfo, nil, addr result.image)
+    var imageMemoryRequirements: VkMemoryRequirements
+    vkCheck vkGetImageMemoryRequirements(device, result.image, addr imageMemoryRequirements)
+    result.memory = vkwAllocateDeviceMemory(device, deviceMemoryProperties, imageMemoryRequirements, VkMemoryPropertyFlags VkMemoryPropertyFlagBits.hostVisible)
+    vkCheck vkBindImageMemory(device, result.image, result.memory, 0)
+
+proc vkwCreateImageView*(device: VkDevice, image: VkImage
+        , format = VkFormat.r32g32b32a32SFloat
+    ): VkImageView =
+    let vkTextureImageViewCreateInfo = VkImageViewCreateInfo(
+            sType: VkStructureType.imageViewCreateInfo
+            , image: image
+            , viewType: VkImageViewType.twoDee
+            , format: VkFormat.r32g32b32a32SFloat
+            , components: VkComponentMapping(r: VkComponentSwizzle.r, g: VkComponentSwizzle.g, b: VkComponentSwizzle.b, a: VkComponentSwizzle.a)
+            , subresourceRange: VkImageSubresourceRange(
+                aspectMask: uint32 VkImageAspectFlagBits.color
+                , baseMipLevel: 0
+                , levelCount: 1
+                , baseArrayLayer: 0
+                , layerCount: 1
+            )
+        )
+    vkCheck vkCreateImageView(device, unsafeAddr vkTextureImageViewCreateInfo, nil, addr result)
+
+proc vkwCreateImageSampler*(device: VkDevice): VkSampler =
+    let samplerCreateInfo = VkSamplerCreateInfo(
+            sType: VkStructureType.samplerCreateInfo
+            , magFilter: VkFilter.linear
+            , minFilter: VkFilter.linear
+            , mipmapMode: VkSamplerMipmapMode.linear
+            , addressModeU: VkSamplerAddressMode.clampToEdge
+            , addressModeV: VkSamplerAddressMode.clampToEdge
+            , addressModeW: VkSamplerAddressMode.clampToEdge
+            , mipLodBias: 0
+            , anisotropyEnable: vkFalse
+            , minLod: 0
+            , maxLod: 5
+            , borderColor: VkBorderColor.floatTransparentBlack
+            , unnormalizedCoordinates: vkFalse
+        )
+    vkCheck vkCreateSampler(device, unsafeAddr samplerCreateInfo, nil, addr result)
+
+proc vkwCreateImageDescriptorSet*(
+        device: VkDevice
+        , descriptorPool: VkDescriptorPool
+        , descriptorLayout: var VkDescriptorSetLayout
+        , sampler: VkSampler
+        , imageView: VkImageView
+    ): VkDescriptorSet =
+    let 
+        descriptorAllocateInfo = VkDescriptorSetAllocateInfo(
+            sType: VkStructureType.descriptorSetAllocateInfo
+            , descriptorPool: descriptorPool
+            , descriptorSetCount: 1
+            , pSetLayouts: addr descriptorLayout
+        )
+    vkCheck vkAllocateDescriptorSets(device, unsafeAddr descriptorAllocateInfo, addr result)
+
+    let 
+        imageInfo = VkDescriptorImageInfo(
+            sampler: sampler
+            , imageView: imageView
+            , imageLayout: VkImageLayout.shaderReadOnlyOptimal
+        )
+        writeDescriptor = VkWriteDescriptorSet(
+            sType: VkStructureType.writeDescriptorSet
+            , dstSet: result
+            , dstBinding: 0
+            , dstArrayElement: 0
+            , descriptorCount: 1
+            , descriptorType: VkDescriptorType.combinedImageSampler
+            , pImageInfo: unsafeAddr imageInfo
+            , pBufferInfo: nil
+            , pTexelBufferView: nil
+        )
+
+    vkCheck vkUpdateDescriptorSets(device, 1, unsafeAddr writeDescriptor, 0, nil)
+
+type
+    VkwImageLayoutTransitionType* {.pure.} = enum
+        ColorTextureInitialization
+
+proc vkwTransitionImageLayout*(
+    device: VkDevice
+    , image: VkImage
+    , commandBuffer: var VkCommandBuffer
+    , queue: VkQueue
+    , fence: var VkFence
+    , transitionType: VkwImageLayoutTransitionType
+    ) =
+    case transitionType:
+        of ColorTextureInitialization:
+            vkwTransitionImageLayout(
+                device = device
+                , image = image
+                , commandBuffer = commandBuffer
+                , queue = queue
+                , fence = fence
+                , srcAccessMask = uint32 VkAccessFlagBits.hostWrite
+                , dstAccessMask = uint32 VkAccessFlagBits.shaderRead
+                , oldLayout = VkImageLayout.preinitialized
+                , newLayout = VkImageLayout.shaderReadOnlyOptimal
+                , srcStageMask = uint32 VkPipelineStageFlagBits.host
+                , dstStageMask = uint32 VkPipelineStageFlagBits.fragmentShader
+                , subresourceRangeAspectMask = uint32 VkImageAspectFlagBits.color
+            )
+
 proc vkwLoadColorTextures*(
     device: VkDevice
     , memoryProperties: VkPhysicalDeviceMemoryProperties
@@ -637,10 +762,10 @@ proc vkwFreeBuffer*(
     vkCheck vkDestroyBuffer(device, buffer.buffer, nil)
     vkCheck vkFreeMemory(device, buffer.memory, nil)
 
-proc vkwWithMemory*(device: VkDevice, memory: VkDeviceMemory, action: proc(memory: pointer)) =
-    var memoryPtr {.inject.}: pointer
-    vkCheck vkMapMemory(device, memory, 0, high uint64, 0, addr memoryPtr)
-    action(memoryPtr)
+proc vkwWithMemoryBegin(device: VkDevice, memory: VkDeviceMemory): pointer =
+    vkCheck vkMapMemory(device, memory, 0, high uint64, 0, addr result)
+
+proc vkwWithMemoryEnd(device: VkDevice, memory: VkDeviceMemory) =
     let memoryRange = VkMappedMemoryRange(
         sType: VkStructureType.mappedMemoryRange
         , memory: memory
@@ -649,3 +774,9 @@ proc vkwWithMemory*(device: VkDevice, memory: VkDeviceMemory, action: proc(memor
     )
     vkCheck vkFlushMappedMemoryRanges(device, 1, unsafeAddr memoryRange)
     vkCheck vkUnmapMemory(device, memory)
+
+template vkwWithMemory*(device: VkDevice, memory: VkDeviceMemory, operations: untyped): untyped =
+    block:
+        var memoryPtr {.inject.} = vkwWithMemoryBegin(device, memory)
+        operations
+        vkwWithMemoryEnd(device, memory)

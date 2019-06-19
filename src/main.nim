@@ -10,6 +10,7 @@ import render/vulkan_wrapper
 import render/render_vk
 import utility
 import ecs
+import tiled_integration
 
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
