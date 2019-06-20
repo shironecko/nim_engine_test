@@ -68,16 +68,17 @@ updateRenderResolution(windowDimentions)
 
 var world: World
 loadMapIntoWorld("../assets/maps/sample_map.tmx", world, renderContext)
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(0, -150))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0, 0)
-#         , maxUV: vec2f(0.25, 0.25)
-#         , texture: atlas
-#     )
-# )
+var fontRegistry: FontRegistry
+let font = asLoadBitmapFont("../assets/fonts/ProFontWindows.bff", fontRegistry, renderContext)
+discard addEntity(
+    world
+    , TransformComponent(position: vec2f(0, 0))
+    , TextComponent(
+        text: "New bitmap font system test.\nCheck.\nCheck-check."
+        , font: font
+        , tint: BLUE
+    )
+)
 # discard addEntity(
 #     world
 #     , TransformComponent(position: vec2f(0, 0))
@@ -85,66 +86,6 @@ loadMapIntoWorld("../assets/maps/sample_map.tmx", world, renderContext)
 #         dimensions: vec2f(128, 128)
 #         , minUV: vec2f(0, 0)
 #         , maxUV: vec2f(0.25, 0.25)
-#         , texture: atlas
-#     )
-# )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(150, 0))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0.25, 0)
-#         , maxUV: vec2f(0.5, 0.25)
-#         , texture: atlas
-#     )
-# )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(300, 0))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0.5, 0)
-#         , maxUV: vec2f(0.75, 0.25)
-#         , texture: atlas
-#     )
-# )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(450, 0))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0.75, 0)
-#         , maxUV: vec2f(1.0, 0.25)
-#         , texture: atlas
-#     )
-# )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(0, 150))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0, 0.25)
-#         , maxUV: vec2f(0.25, 0.5)
-#         , texture: atlas
-#     )
-# )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(150, 150))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0.25, 0.25)
-#         , maxUV: vec2f(0.5, 0.5)
-#         , texture: atlas
-#     )
-# )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(300, 150))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0.5, 0.25)
-#         , maxUV: vec2f(0.75, 0.5)
 #         , texture: atlas
 #     )
 # )
@@ -186,12 +127,9 @@ block GameLoop:
         if keys[int SDL_SCANCODE_S] == 1:
             cameraPosition.y += cameraSpeed * dt
         
-        var renderList = RdRenderList(
-            sprites: spriteRenderSystem(world)
-            #, text: @[
-            #    RdBitmapFontRenderRequest(x: 0, y: 0, text: "Bitmap font render test.\nHello, Vulkan!", font: font)
-            #]
-        )
+        var renderList: RdRenderList
+        spriteRenderSystem(world, renderList)
+        textRenderSystem(world, renderList, fontRegistry)
         rdRenderAndPresent(renderContext, cameraPosition, renderList)
 
 destroyWindow(window)
