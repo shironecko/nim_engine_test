@@ -5,6 +5,7 @@ import strformat
 import glm
 import log
 import sdl2
+import sdl2/image as img
 import vulkan as vk except vkCreateDebugReportCallbackEXT, vkDestroyDebugReportCallbackEXT
 import render/vulkan_wrapper
 import render/render_vk
@@ -16,7 +17,9 @@ import assets
 proc GetTime*(): float64 =
     return cast[float64](getPerformanceCounter()*1000) / cast[float64](getPerformanceFrequency())
 
-sdlCheck sdl2.init(INIT_EVERYTHING), "Failed to init :c"
+sdlCheck sdl2.init(INIT_EVERYTHING), "Failed to init SDL :c"
+let sdlImageInitFlags = cint maskCombine(IMG_INIT_JPG, IMG_INIT_PNG, IMG_INIT_TIF, IMG_INIT_WEBP)
+sdlCheck img.init(sdlImageInitFlags) == sdlImageInitFlags, "Failed to init SDL image :c"
 
 const
     prefferedWidth = 640
