@@ -12,5 +12,5 @@ layout(location = 0) in struct fragment_in {
 layout (location = 0) out vec4 uFragColor;
 
 void main() {
-    uFragColor = texture(imageSampler, IN.uv);
+    uFragColor = IN.vColor * texture(imageSampler, IN.uv);
 }

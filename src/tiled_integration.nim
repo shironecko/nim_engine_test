@@ -55,6 +55,7 @@ proc loadMapIntoWorld*(path: string, world: var World, renderContext: var RdCont
                             , minUV: minUV
                             , maxUV: maxUV
                             , texture: tilesetTexture
+                            , tint: if x == 0 and y == 0: RED else: WHITE
                         )
                     )
                 #     echo &"Dimensions: {tileDimensions}"

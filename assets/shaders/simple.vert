@@ -8,6 +8,7 @@ layout(std140, set= 0, binding = 0) uniform buffer {
 
 layout(location = 0) in vec4 pos;
 layout(location = 1) in vec2 uv;
+layout(location = 2) in vec4 tint;
 
 layout(location = 0) out struct vertex_out {
     vec4 vColor;
@@ -17,5 +18,6 @@ layout(location = 0) out struct vertex_out {
 void main() {
     gl_Position = pos * UBO.matrix;
 
+    OUT.vColor = tint;
     OUT.uv = uv;
 }

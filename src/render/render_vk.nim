@@ -27,10 +27,12 @@ type
         vendor*: RdPhysicalDeviceVendor
         vulkanData: VkwPhysicalDeviceDescription
     
+    RdColorF32* {.packed.} = object
+        r*, g*, b*, a*: float32
+    
     RdRawImageFormat* {.pure.} = enum
         RGBAFloat32 # only one format for now, maybe ever?
-    RdRawImagePixelRGBAFloat32* {.packed.} = object
-        r*, g*, b*, a*: float32
+    RdRawImagePixelRGBAFloat32* = RdColorF32
     RdRawImageData* = object
         width*, height*: uint32
         case format*: RdRawImageFormat
@@ -53,6 +55,7 @@ type
         w*, h*: float32
         minUV*, maxUV*: Vec2f
         texture*: RdTexture
+        tint*: RdColorF32
     RdBitmapFontRenderRequest* = object
         x*, y*: float32
         text*: string
@@ -115,6 +118,20 @@ type
         textures: seq[RdTextureData]
         colorTextureSampler: VkSampler
 
+const
+    WHITE*          = RdColorF32(r: 1.0, g: 1.0, b: 1.0, a: 1.0)
+    BLACK*          = RdColorF32(r: 0.0, g: 0.0, b: 0.0, a: 1.0)
+    RED*            = RdColorF32(r: 1.0, g: 0.0, b: 0.0, a: 1.0)
+    GREEN*          = RdColorF32(r: 0.0, g: 1.0, b: 0.0, a: 1.0)
+    BLUE*           = RdColorF32(r: 0.0, g: 0.0, b: 1.0, a: 1.0)
+    OPAQUE*         = RdColorF32(r: 1.0, g: 1.0, b: 1.0, a: 1.0)
+    TRANSPARENT*    = RdColorF32(r: 1.0, g: 1.0, b: 1.0, a: 0.0)
+
+proc rdBlend*(a, b: RdColorF32): RdColorF32 =
+    RdColorF32(r: a.r * b.r, g: a.g * b.g, b: a.b * b.b, a: a.a * b.a)
+
+proc `*`*(a, b: RdColorF32): RdColorF32 = rdBlend(a, b)
+
 proc rdCreateTexture*(context: var RdContext, imageData: RdRawImageData): RdTexture =
     check context.state == RdContextState.initialized
 
@@ -161,8 +178,9 @@ type
     Vertex {.packed.} = object
         x, y, z, w: float32
         u, v: float32
+        tint: RdColorF32
 
-proc newVertex(position: Vec4f, u, v: float32): Vertex = Vertex(x: position.x, y: position.y, z: position.z, w: position.w, u: u, v: v)
+proc newVertex(position: Vec4f, u, v: float32, tint: RdColorF32): Vertex = Vertex(x: position.x, y: position.y, z: position.z, w: position.w, u: u, v: v, tint: tint)
 
 template convert[B: RdPhysicalDeviceType](a: VkPhysicalDeviceType): B =
     case a:
@@ -782,6 +800,12 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
                 , format: VkFormat.r32g32SFloat
                 , offset: 4 * sizeof(float32)
             )
+            , VkVertexInputAttributeDescription(
+                location: 2
+                , binding: 0
+                , format: VkFormat.r32g32b32a32SFloat
+                , offset: 4 * sizeof(float32) + 2 * sizeof(float32)
+            )
         ]
         pipelineVertexInputStateCreateInfo = VkPipelineVertexInputStateCreateInfo(
             sType: VkStructureType.pipelineVertexInputStateCreateInfo
@@ -973,10 +997,10 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
             
             var model = mat4f(1.0).translate(sprite.x, sprite.y, 0.0).scale(sprite.w, sprite.h, 1.0).transpose()
             let plane = @[
-                newVertex(vec4f(x = -0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.minUV.y),
-                newVertex(vec4f(x =  0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.minUV.y),
-                newVertex(vec4f(x = -0.5, y =  0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.maxUV.y),
-                newVertex(vec4f(x =  0.5, y =  0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.maxUV.y),
+                newVertex(vec4f(x = -0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.minUV.y, sprite.tint),
+                newVertex(vec4f(x =  0.5, y = -0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.minUV.y, sprite.tint),
+                newVertex(vec4f(x = -0.5, y =  0.5, z = 0, w = 1.0) * model, sprite.minUV.x, sprite.maxUV.y, sprite.tint),
+                newVertex(vec4f(x =  0.5, y =  0.5, z = 0, w = 1.0) * model, sprite.maxUV.x, sprite.maxUV.y, sprite.tint),
             ]
             vertices[offset + 0] = plane[0]
             vertices[offset + 1] = plane[1]
