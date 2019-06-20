@@ -53,10 +53,10 @@ let selectedRenderDevice = renderDevices[0]
 gLog LInfo, &"Selected render device: {selectedRenderDevice.name}"
 
 rdInitialize(renderContext, selectedRenderDevice)
-let
+#let
     #fonts = rdLoadBitmapFonts(renderContext, @["../assets/fonts/debug_font.bff"])
     #font = fonts[0]
-    atlas = asLoadColorTexture("../assets/textures/roguelikeSheet_transparent.png", renderContext)
+    #atlas = asLoadColorTexture("../assets/textures/roguelikeSheet_transparent.png", renderContext)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
@@ -64,86 +64,87 @@ proc updateRenderResolution(winDim : WindowDimentions) =
 updateRenderResolution(windowDimentions)
 
 var world: World
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(0, -150))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0, 0)
-        , maxUV: vec2f(0.25, 0.25)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(0, 0))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0, 0)
-        , maxUV: vec2f(0.25, 0.25)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(150, 0))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0.25, 0)
-        , maxUV: vec2f(0.5, 0.25)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(300, 0))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0.5, 0)
-        , maxUV: vec2f(0.75, 0.25)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(450, 0))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0.75, 0)
-        , maxUV: vec2f(1.0, 0.25)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(0, 150))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0, 0.25)
-        , maxUV: vec2f(0.25, 0.5)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(150, 150))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0.25, 0.25)
-        , maxUV: vec2f(0.5, 0.5)
-        , texture: atlas
-    )
-)
-discard addEntity(
-    world
-    , TransformComponent(position: vec2f(300, 150))
-    , SpriteComponent(
-        dimensions: vec2f(128, 128)
-        , minUV: vec2f(0.5, 0.25)
-        , maxUV: vec2f(0.75, 0.5)
-        , texture: atlas
-    )
-)
+loadMapIntoWorld("../assets/maps/sample_map.tmx", world, renderContext)
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(0, -150))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0, 0)
+#         , maxUV: vec2f(0.25, 0.25)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(0, 0))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0, 0)
+#         , maxUV: vec2f(0.25, 0.25)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(150, 0))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0.25, 0)
+#         , maxUV: vec2f(0.5, 0.25)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(300, 0))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0.5, 0)
+#         , maxUV: vec2f(0.75, 0.25)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(450, 0))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0.75, 0)
+#         , maxUV: vec2f(1.0, 0.25)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(0, 150))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0, 0.25)
+#         , maxUV: vec2f(0.25, 0.5)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(150, 150))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0.25, 0.25)
+#         , maxUV: vec2f(0.5, 0.5)
+#         , texture: atlas
+#     )
+# )
+# discard addEntity(
+#     world
+#     , TransformComponent(position: vec2f(300, 150))
+#     , SpriteComponent(
+#         dimensions: vec2f(128, 128)
+#         , minUV: vec2f(0.5, 0.25)
+#         , maxUV: vec2f(0.75, 0.5)
+#         , texture: atlas
+#     )
+# )
 
 var
     evt: sdl2.Event

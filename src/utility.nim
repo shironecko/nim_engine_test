@@ -5,6 +5,13 @@ import log
 template high*[T: uint64](_: typedesc[T]): uint64 = 0xFFFFFFFF_FFFFFFFF'u64
 template low*[T: uint64](_: typedesc[T]): uint64 = 0'u64
 
+template mapToRange32*[A, B, C](x: A, min: B, max: C): float32 =
+    let
+        fx = float32 x
+        fmin = float32 min
+        fmax = float32 max
+    (fx - fmin) / (fmax - fmin)
+
 template convert*[A, B](a: A): B =
     {.fatal: &"Convertions is not defined for types: {A}, {B}!".}
 
