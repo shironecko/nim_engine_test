@@ -56,10 +56,6 @@ let selectedRenderDevice = renderDevices[0]
 gLog LInfo, &"Selected render device: {selectedRenderDevice.name}"
 
 rdInitialize(renderContext, selectedRenderDevice)
-#let
-    #fonts = rdLoadBitmapFonts(renderContext, @["../assets/fonts/debug_font.bff"])
-    #font = fonts[0]
-    #atlas = asLoadColorTexture("../assets/textures/roguelikeSheet_transparent.png", renderContext)
 
 proc updateRenderResolution(winDim : WindowDimentions) =
     gLog LInfo, &"Render resolution changed to: ({winDim.width}, {winDim.height})"
@@ -79,16 +75,6 @@ discard addEntity(
         , tint: BLUE
     )
 )
-# discard addEntity(
-#     world
-#     , TransformComponent(position: vec2f(0, 0))
-#     , SpriteComponent(
-#         dimensions: vec2f(128, 128)
-#         , minUV: vec2f(0, 0)
-#         , maxUV: vec2f(0.25, 0.25)
-#         , texture: atlas
-#     )
-# )
 
 var
     evt: sdl2.Event

@@ -82,12 +82,9 @@ proc spriteRenderSystem*(world: World, renderList: var RdRenderList) =
 
 proc textRenderSystem*(world: World, renderList: var RdRenderList, fontRegistry: FontRegistry) =
     let queryMask = maskCombine(TRANSFORM_COMPONENT_ID, TEXT_COMPONENT_ID)
-    var textEntitiesFount = 0
     for i, entityMask in world.entityMasks:
         if maskCheck(entityMask, queryMask):
-            textEntitiesFount += 1
             let
                 transform = world.transformComponents[i]
                 text = world.textComponents[i]
             asRenderText(text.text, transform.position.x, transform.position.y, 20, text.tint, text.font, fontRegistry, renderList)
-    echo &"Text entities found: {textEntitiesFount}"

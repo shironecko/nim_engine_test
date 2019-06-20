@@ -14,7 +14,6 @@ const
     VERTEX_BUFFER_SIZE = MAX_SPRITES_PER_FRAME * 6
     INVALID_RESOURCE_ID = -1
     MAX_TEXTURES_LOADED = 512
-    DEBUG_FONT_TEXTURE_ID = 0
 
 type
     RdPhysicalDeviceType* {.pure.} = enum
@@ -48,8 +47,6 @@ type
     
     RdTexture* = object # a texture is actually just an index into descriptor sets array
         id: int
-    RdBitmapFont* = object
-        id: int
     RdSpriteRenderRequest* = object
         x*, y*: float32
         w*, h*: float32
@@ -57,13 +54,8 @@ type
         texture*: RdTexture
         tint*: RdColorF32
         order*: uint8
-    RdBitmapFontRenderRequest* = object
-        x*, y*: float32
-        text*: string
-        font*: RdBitmapFont
     RdRenderList* = object
         sprites*: seq[RdSpriteRenderRequest]
-        text*: seq[RdBitmapFontRenderRequest]
     
     RdContextState {.pure.} = enum
         uninitialized, preInitialized, initialized
@@ -71,22 +63,6 @@ type
         pool: VkDescriptorPool
         layout: VkDescriptorSetLayout
     
-    RdBitmapFontHeader {.packed.} = object
-        signatureBytes: array[2, uint8]
-        width, height: uint32
-        cellWidth, cellHeight: uint32
-        bitsPerPixel: uint8
-        baseCharacter: uint8
-        characterWidth: array[256, uint8]
-    RdBitmapFontTexturePixel* {.packed.} = object
-        r, g, b, a: float32
-    RdBitmapFontData = object
-        cellWidth, cellHeight: uint32
-        textureWidth, textureHeight: uint32
-        baseCharacter: uint8
-        pixels: seq[RdBitmapFontTexturePixel]
-        texture: RdTexture
-
     RdContext* = object
         state: RdContextState
         instance: VkInstance
@@ -115,7 +91,6 @@ type
         pipeline: VkPipeline
         textureDescriptorSetAllocationData: RdDescriptorSetAllocateData
         textureDescriptorSets: seq[VkDescriptorSet]
-        bitmapFonts: seq[RdBitmapFontData]
         textures: seq[RdTextureData]
         colorTextureSampler: VkSampler
 
@@ -152,28 +127,6 @@ proc rdCreateTexture*(context: var RdContext, imageData: RdRawImageData): RdText
 
     context.textures.add(texture)
     RdTexture(id: context.textures.len() - 1)
-
-
-proc rdLoadBitmapFontData(path: string): RdBitmapFontData =
-    var
-        fontContents = readBinaryFile(path)
-        fontHeader = cast[ptr RdBitmapFontHeader](addr fontContents[0])
-        fontPixels = cast[ptr UncheckedArray[uint8]](addr fontContents[sizeof(RdBitmapFontHeader)])
-        pixelCount = fontHeader.width * fontHeader.height
-    check fontHeader.signatureBytes[0] == 0xBF'u8 and fontHeader.signatureBytes[1] == 0xF2'u8, "Debug font file header signature mismatch!"
-    check fontHeader.bitsPerPixel == 8, &"Debug font file bitness per pixel mismant! Expected: 8, Got: {fontHeader.bitsPerPixel}"
-    result.textureWidth = fontHeader.width
-    result.textureHeight = fontHeader.height
-    result.cellWidth = fontHeader.cellWidth
-    result.cellHeight = fontHeader.cellHeight
-    result.baseCharacter = fontHeader.baseCharacter
-    vkLog LTrace, $result
-    result.pixels.setLen(pixelCount)
-    for i in 0..<pixelCount:
-        let pixel =
-            if fontPixels[i] >= 1'u8: RdBitmapFontTexturePixel(r:0.0'f32, g:1.0'f32, b:1.0'f32, a:1.0'f32)
-            else: RdBitmapFontTexturePixel(r:0.0'f32, g:1.0'f32, b:0.0'f32, a:1.0'f32)
-        result.pixels.add pixel
 
 type
     Vertex {.packed.} = object
@@ -954,38 +907,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
         RenderBatch = object
             offset, primitiveCount: uint32
             texture: RdTexture
-    var spriteDrawRequests = renderList.sprites
-    for text in renderList.text:
-        var 
-            fontData = context.bitmapFonts[text.font.id]
-            cellsPerRow = uint32(float32(fontData.textureWidth) / float32(fontData.cellWidth))
-            glyphPos = vec2f(text.x, text.y)
-        for glyph in text.text:
-            if glyph == '\n':
-                glyphPos.x = text.x
-                glyphPos.y += float32 fontData.cellHeight
-                continue
-            let
-                glyphIndex = uint32(glyph) - fontData.baseCharacter
-                glyphRow = uint32(float32(glyphIndex) / float32(cellsPerRow))
-                glyphCol = glyphIndex - glyphRow * cellsPerRow
-                cellU = float32(fontData.cellWidth) / float32(fontData.textureWidth)
-                cellV = float32(fontData.cellHeight) / float32(fontData.textureHeight)
-                cellUV = vec2f(cellU, cellV)
-                glyphMinUV = vec2f(cellU * float32 glyphCol, cellV * float32 glyphRow)
-            
-            spriteDrawRequests.add(RdSpriteRenderRequest(
-                x: glyphPos.x
-                , y: glyphPos.y
-                , w: float32 fontData.cellWidth
-                , h: float32 fontData.cellHeight
-                , minUV: glyphMinUV
-                , maxUV: glyphMinUV + cellUV
-                , texture: fontData.texture
-            ))
-            glyphPos.x += float32 fontData.cellWidth
-
-    spriteDrawRequests.sort(proc (a, b: RdSpriteRenderRequest): int =
+    var spriteDrawRequests = renderList.sprites.sorted(proc (a, b: RdSpriteRenderRequest): int =
         if a.order == b.order: a.texture.id - b.texture.id
         else: int(a.order) - int(b.order)
     )
