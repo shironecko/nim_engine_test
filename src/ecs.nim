@@ -5,7 +5,7 @@ import log
 import render/render_vk
 
 const
-    MAX_ENTITIES = 1024
+    MAX_ENTITIES = 5000
     NO_COMPONENTS_MASK          = 0
     TRANSFORM_COMPONENT_ID      = 1 shl 0
     SPRITE_COMPONENT_ID         = 1 shl 1
@@ -31,6 +31,8 @@ proc addEntity*(world: var World, componentMask: ComponentMask): Entity =
         if entityMask == NO_COMPONENTS_MASK:
             world.entityMasks[i] = componentMask
             return i
+    
+    check false, &"Max number of {MAX_ENTITIES} is exceded!"
 
 proc setEntityComponentData*(world: var World, entity: Entity, transform: TransformComponent) =
     check maskCheck(world.entityMasks[entity], TRANSFORM_COMPONENT_ID)
