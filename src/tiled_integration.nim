@@ -28,9 +28,8 @@ proc loadMapIntoWorld*(path: string, world: var World, renderContext: var RdCont
             splitFile(path).dir / tileset.imagePath
             , renderContext
         )
-    let layer = map.layers[0]
-    block WholeLoop:
-    #for layer in map.layers:
+    
+    for layer in map.layers:
         for y in 0..<layer.height:
             for x in 0..<layer.width:
                 let
@@ -58,10 +57,3 @@ proc loadMapIntoWorld*(path: string, world: var World, renderContext: var RdCont
                             , tint: if x == 0 and y == 0: RED else: WHITE
                         )
                     )
-                #     echo &"Dimensions: {tileDimensions}"
-                #     echo &"WorldPosition: {tileWorldPosition}"
-                #     echo &"Index: {tileIndex}"
-                #     echo &"setIndex: {tilesetIndex}"
-                #     echo &"Region: {tileRegion}"
-                #     echo &"UV: {minUV} {maxUV}"
-                # break WholeLoop

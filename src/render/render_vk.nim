@@ -879,14 +879,14 @@ proc rdInitialize*(context: var RdContext, selectedPhysicalDevice: RdPhysicalDev
             , maxDepthBounds: 0
         )
         colorBlendAttachmentState = VkPipelineColorBlendAttachmentState(
-            blendEnable: vkFalse
-            , srcColorBlendFactor: VkBlendFactor.srcColor
-            , dstColorBlendFactor: VkBlendFactor.oneMinusDstColor
+            blendEnable: vkTrue
+            , srcColorBlendFactor: VkBlendFactor.srcAlpha
+            , dstColorBlendFactor: VkBlendFactor.oneMinusSrcAlpha
             , colorBlendOp: VkBlendOp.opAdd
-            , srcAlphaBlendFactor: VkBlendFactor.zero
+            , srcAlphaBlendFactor: VkBlendFactor.one
             , dstAlphaBlendFactor: VkBlendFactor.zero
             , alphaBlendOp: VkBlendOp.opAdd
-            , colorWriteMask: 0xf
+            , colorWriteMask: uint32 maskCombine(VkColorComponentFlagBits.r, VkColorComponentFlagBits.g, VkColorComponentFlagBits.b, VkColorComponentFlagBits.a)
         )
         colorBlendState = VkPipelineColorBlendStateCreateInfo(
             sType: VkStructureType.pipelineColorBlendStateCreateInfo
