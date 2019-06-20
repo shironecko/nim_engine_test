@@ -20,6 +20,7 @@ type
         minUV*, maxUV*: Vec2f
         texture*: RdTexture
         tint*: RdColorF32
+        order*: uint8
     ComponentArray*[T] = array[MAX_ENTITIES, T]
     World* = object
         entityMasks: ComponentArray[ComponentMask]
@@ -60,4 +61,5 @@ proc spriteRenderSystem*(world: World): seq[RdSpriteRenderRequest] =
                 , minUV: sprite.minUV, maxUV: sprite.maxUV
                 , texture: sprite.texture
                 , tint: sprite.tint
+                , order: sprite.order
             )

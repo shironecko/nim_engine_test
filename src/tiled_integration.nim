@@ -29,7 +29,7 @@ proc loadMapIntoWorld*(path: string, world: var World, renderContext: var RdCont
             , renderContext
         )
     
-    for layer in map.layers:
+    for i, layer in map.layers:
         for y in 0..<layer.height:
             for x in 0..<layer.width:
                 let
@@ -54,6 +54,7 @@ proc loadMapIntoWorld*(path: string, world: var World, renderContext: var RdCont
                             , minUV: minUV
                             , maxUV: maxUV
                             , texture: tilesetTexture
-                            , tint: if x == 0 and y == 0: RED else: WHITE
+                            , tint: WHITE
+                            , order: uint8 i
                         )
                     )

@@ -56,6 +56,7 @@ type
         minUV*, maxUV*: Vec2f
         texture*: RdTexture
         tint*: RdColorF32
+        order*: uint8
     RdBitmapFontRenderRequest* = object
         x*, y*: float32
         text*: string
@@ -932,7 +933,7 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
             eye = vec3(0.0'f32, 0.0'f32, -1.0'f32)
             , center = vec3(0.0'f32)
             , up = vec3(0.0'f32, -1.0'f32, 0.0'f32)
-        ).translate(-cameraPosition)
+        ).translate(-vec3f(round(cameraPosition.x), round(cameraPosition.y), round(cameraPosition.z)))
         projection = ortho(
             float32(640) * -0.5'f32
             , float32(640) * 0.5'f32
@@ -984,7 +985,10 @@ proc rdRenderAndPresent*(context: var RdContext, cameraPosition: Vec3f, renderLi
             ))
             glyphPos.x += float32 fontData.cellWidth
 
-    spriteDrawRequests.sort(proc (a, b: RdSpriteRenderRequest): int = a.texture.id - b.texture.id)
+    spriteDrawRequests.sort(proc (a, b: RdSpriteRenderRequest): int =
+        if a.order == b.order: a.texture.id - b.texture.id
+        else: int(a.order) - int(b.order)
+    )
     var renderBatches: seq[RenderBatch]
     vkwWithMemory context.device, context.vertexBuffer.memory:
         var vertices = cast[ptr UncheckedArray[Vertex]](memoryPtr)
